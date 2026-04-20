@@ -26,8 +26,18 @@ BASELINE = {
     "avg_bet": 185,
     "spend_per_min": 210,
     "wagered_per_5min": 150_000,
+    "theo_per_5min": 7_500,        # ~5% blended house edge × 150K wagered
+    "house_edge": 0.0500,          # 5.00% blended across the typical game mix
     "win_rate": 0.42,
     "label": "vs last month avg",
+}
+
+# House edge constants shown in the explanation card (must match 02_feature_mvs.sql)
+HOUSE_EDGES = {
+    "Slots":     0.0750,
+    "Roulette":  0.0526,
+    "Blackjack": 0.0075,
+    "Poker":     0.0250,
 }
 
 EXAMPLE_QUESTIONS = [
@@ -179,8 +189,9 @@ cur_df = query("""
     SELECT
         COUNT(DISTINCT player_id) AS active_players,
         AVG(avg_bet) AS avg_bet,
-        AVG(spend_per_minute) AS avg_spend_per_min,
         SUM(total_bet) AS total_wagered,
+        SUM(theo_win_window) AS theo_win_window,
+        AVG(effective_house_edge) AS avg_house_edge,
         AVG(win_rate) AS avg_win_rate,
         MAX(window_end) AS latest_window
     FROM mv_player_features
@@ -190,28 +201,38 @@ cur_df = query("""
 if not cur_df.empty and cur_df["active_players"].iloc[0] is not None and int(cur_df["active_players"].iloc[0]) > 0:
     cur = cur_df.iloc[0]
     cur_bet = float(cur["avg_bet"])
-    cur_spend = float(cur["avg_spend_per_min"])
     cur_wagered = float(cur["total_wagered"])
+    cur_theo = float(cur["theo_win_window"] or 0.0)
+    cur_edge = float(cur["avg_house_edge"] or 0.0)
     cur_wr = float(cur["avg_win_rate"])
 
     d_bet = cur_bet - BASELINE["avg_bet"]
-    d_spend = cur_spend - BASELINE["spend_per_min"]
     d_wagered = cur_wagered - BASELINE["wagered_per_5min"]
-    d_wr = cur_wr - BASELINE["win_rate"]
+    d_theo = cur_theo - BASELINE["theo_per_5min"]
+    d_edge = cur_edge - BASELINE["house_edge"]
     lbl = BASELINE["label"]
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Active Players", int(cur["active_players"]))
     c2.metric("Avg Bet", f"${cur_bet:,.0f}",
               delta=f"${d_bet:+,.0f} {lbl}" if abs(d_bet) >= 1 else None)
-    c3.metric("Avg Spend/min", f"${cur_spend:,.1f}",
-              delta=f"${d_spend:+,.1f} {lbl}" if abs(d_spend) >= 0.1 else None)
-    c4.metric("Total Wagered (window)", f"${cur_wagered:,.0f}",
+    c3.metric("Total Wagered (window)", f"${cur_wagered:,.0f}",
               delta=f"${d_wagered:+,.0f} {lbl}" if abs(d_wagered) >= 1 else None)
-    c5.metric("Avg Win Rate", f"{cur_wr:.1%}",
-              delta=f"{d_wr:+.1%} {lbl}" if abs(d_wr) >= 0.001 else None)
+    c4.metric("Theo Win (window)", f"${cur_theo:,.0f}",
+              delta=f"${d_theo:+,.0f} {lbl}" if abs(d_theo) >= 1 else None,
+              help="Theoretical Win = Σ(bet × house_edge). Casino's expected profit from this window's play, independent of short-term luck.")
+    c5.metric("Effective House Edge", f"{cur_edge:.2%}",
+              delta=f"{d_edge:+.2%} {lbl}" if abs(d_edge) >= 0.0001 else None,
+              delta_color="normal",
+              help="Blended house edge given the actual game mix being played. Higher = more profitable game mix.")
 
-    st.caption(f"Current window: {cur['latest_window']}  |  Baseline: last month daily avg (Avg Bet ${BASELINE['avg_bet']}, Spend/min ${BASELINE['spend_per_min']}, Wagered/window ${BASELINE['wagered_per_5min']:,}, Win Rate {BASELINE['win_rate']:.0%})")
+    st.caption(
+        f"Current window: {cur['latest_window']}  |  "
+        f"Baseline (last month daily avg): Avg Bet ${BASELINE['avg_bet']}, "
+        f"Wagered/window ${BASELINE['wagered_per_5min']:,}, "
+        f"Theo/window ${BASELINE['theo_per_5min']:,}, "
+        f"House Edge {BASELINE['house_edge']:.2%}"
+    )
 else:
     st.info("Waiting for player data to arrive...")
 
@@ -227,6 +248,7 @@ with left:
                ROUND(high_roller_similarity::numeric, 3) AS similarity,
                ROUND(avg_bet::numeric, 0) AS avg_bet,
                ROUND(cumulative_gaming_spend::numeric, 0) AS total_spend,
+               ROUND(cumulative_theo_win::numeric, 0) AS theo_win,
                ROUND(spend_per_minute::numeric, 1) AS spend_per_min,
                category_diversity
         FROM mv_high_roller_radar
@@ -295,7 +317,8 @@ with left:
         styled_radar = radar_df.rename(columns={
             "player_id": "Player", "tier": "Tier", "similarity": "HR Score",
             "avg_bet": "Avg Bet", "total_spend": "Total Spend",
-            "spend_per_min": "$/min", "category_diversity": "Categories", "archetype": "Type",
+            "theo_win": "Theo Win", "spend_per_min": "$/min",
+            "category_diversity": "Categories", "archetype": "Type",
         })
         st.dataframe(
             styled_radar.style.applymap(hr_color, subset=["HR Score"]),
@@ -308,6 +331,7 @@ with right:
                ROUND(churn_probability::numeric, 3) AS churn_prob,
                ROUND(high_roller_score::numeric, 3) AS hr_score,
                high_roller_trajectory AS hr_trajectory, tier,
+               ROUND(cumulative_theo_win::numeric, 0) AS theo_win,
                ROUND(offer_value::numeric, 0) AS offer_value
         FROM mv_actionable_recommendations
         ORDER BY
@@ -323,12 +347,74 @@ with right:
                 "player_id": "Player", "next_best_game": "Suggested Game",
                 "action_type": "Action", "churn_prob": "Churn Risk",
                 "hr_score": "HR Score", "hr_trajectory": "HR Track",
-                "tier": "Tier", "offer_value": "Offer $", "offer_sensitivity": "Best Offer",
+                "tier": "Tier", "theo_win": "Theo Win",
+                "offer_value": "Offer $", "offer_sensitivity": "Best Offer",
             }),
             hide_index=True, use_container_width=True,
         )
     else:
         st.info("Waiting for ML predictions...")
+
+st.divider()
+
+# --- Theo Win section ---
+st.subheader("Theoretical Win & House Advantage")
+theo_left, theo_mid, theo_right = st.columns([1.2, 1.2, 1])
+
+with theo_left:
+    theo_tier_df = query("""
+        SELECT tier,
+               players,
+               ROUND(total_theo_win::numeric, 0)       AS total_theo,
+               ROUND(avg_theo_per_player::numeric, 0)  AS avg_theo,
+               ROUND(avg_effective_house_edge::numeric, 4) AS avg_edge
+        FROM mv_theo_by_tier
+        ORDER BY
+            CASE tier WHEN 'diamond' THEN 1 WHEN 'platinum' THEN 2
+                      WHEN 'gold' THEN 3 WHEN 'silver' THEN 4
+                      WHEN 'bronze' THEN 5 ELSE 6 END
+    """)
+    if not theo_tier_df.empty:
+        fig_theo = px.bar(
+            theo_tier_df, x="tier", y="total_theo", color="tier",
+            title="Cumulative Theo Win by Tier",
+            labels={"tier": "Tier", "total_theo": "Total Theo Win ($)"},
+            color_discrete_map={
+                "diamond": "#b9f2ff", "platinum": "#e5e4e2", "gold": "#f1c40f",
+                "silver": "#bdc3c7", "bronze": "#cd7f32",
+            },
+        )
+        fig_theo.update_layout(height=320, margin=dict(t=40, b=20), showlegend=False)
+        st.plotly_chart(fig_theo, use_container_width=True)
+
+with theo_mid:
+    if not theo_tier_df.empty:
+        fig_edge = px.bar(
+            theo_tier_df, x="tier", y="avg_edge", color="tier",
+            title="Avg Effective House Edge by Tier",
+            labels={"tier": "Tier", "avg_edge": "Effective House Edge"},
+            color_discrete_map={
+                "diamond": "#b9f2ff", "platinum": "#e5e4e2", "gold": "#f1c40f",
+                "silver": "#bdc3c7", "bronze": "#cd7f32",
+            },
+        )
+        fig_edge.update_yaxes(tickformat=".2%")
+        fig_edge.update_layout(height=320, margin=dict(t=40, b=20), showlegend=False)
+        st.plotly_chart(fig_edge, use_container_width=True)
+
+with theo_right:
+    st.markdown("**House Advantage reference**")
+    edge_lines = "\n".join([f"- **{g}** — {e:.2%}" for g, e in HOUSE_EDGES.items()])
+    st.markdown(edge_lines)
+    st.caption(
+        "**Theo Win** = Σ(bet × house_edge). The casino's expected profit regardless of short-term luck. "
+        "Effective house edge = Theo Win ÷ Total Wagered — a player shifting from slots to blackjack "
+        "lowers this number even if they bet more."
+    )
+    st.caption(
+        "Reinvestment tiers (offer_value): **40%** of theo for urgent retention, **35%** for VIP upgrade, "
+        "**25%** for standard retention, **15%** for baseline loyalty."
+    )
 
 st.divider()
 
