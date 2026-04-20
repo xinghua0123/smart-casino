@@ -29,12 +29,12 @@ Running per-player lifetime totals (no window — updated continuously).
 Columns: player_id, cumulative_theo_win (FLOAT), cumulative_wagered (FLOAT), effective_house_edge (FLOAT 0-1)
 
 ### mv_player_high_roller_similarity
-Per-player high-roller similarity score (0-1). Higher = more similar to known VIPs.
+Per-player, per-5-min-window high-roller similarity score (0-1). Higher = more similar to known VIPs. This view contains multiple rows per player over time.
 Columns: player_id, window_start, tier, archetype, avg_bet, cumulative_gaming_spend, cumulative_fnb_spend, spend_per_minute, category_diversity, theo_win_window, cumulative_theo_win, effective_house_edge, high_roller_similarity (FLOAT 0-1)
 
 ### mv_high_roller_radar
-Filtered view: only non-VIP players with high_roller_similarity > 0.4 (emerging VIP candidates).
-Same columns as mv_player_high_roller_similarity.
+Filtered current-candidate view: only non-VIP players with high_roller_similarity > 0.4, keeping only the latest row per player_id. Use this for unique emerging VIP candidates.
+Columns: player_id, tier, archetype, high_roller_similarity, avg_bet, cumulative_gaming_spend, cumulative_fnb_spend, spend_per_minute, category_diversity, theo_win_window, cumulative_theo_win, effective_house_edge, window_start
 
 ### mv_actionable_recommendations
 ML predictions joined with business rules. One row per player.
@@ -64,11 +64,22 @@ Columns: active_players (INT), avg_bet_all (FLOAT), avg_spend_per_min (FLOAT), t
 ## Rules
 1. ONLY generate SELECT queries. Never generate INSERT, UPDATE, DELETE, DROP, or any DDL.
 2. Always use LIMIT to avoid returning too many rows (max 20 unless the user asks for more).
-3. Use ROUND() for decimal values to keep output readable.
-4. When the user asks about "high rollers" or "VIP candidates", query mv_high_roller_radar or mv_player_high_roller_similarity.
-5. When the user asks about "recommendations" or "churn" or "retention", query mv_actionable_recommendations.
-6. For general player stats, use mv_player_features.
-7. RisingWave uses PostgreSQL-compatible SQL syntax.
+3. For decimal values, use `ROUND(value::numeric, n)` or `ROUND(CAST(value AS NUMERIC), n)` because RisingWave requires NUMERIC for the 2-argument ROUND function.
+4. When the user asks about current "high rollers", "VIP candidates", "top candidates", or "unique candidates", query mv_high_roller_radar.
+5. Use mv_player_high_roller_similarity only for historical, time-window, or trend questions about how similarity changes over time.
+6. When ranking or listing players/candidates, ensure one row per player_id unless the user explicitly asks for window-level history.
+7. When the user asks about "recommendations" or "churn" or "retention", query mv_actionable_recommendations.
+8. For general player stats, use mv_player_features.
+9. RisingWave uses PostgreSQL-compatible SQL syntax.
+"""
+
+HISTORY_CONTEXT_GUIDANCE = """
+## Conversation Memory
+You may receive a "Conversation memory" section containing earlier user questions, SQL queries, and result rows.
+
+- Use that memory to resolve follow-up references like "these 5 players", "them", "those candidates", "same group", or "their metrics".
+- If a prior result set includes explicit player IDs or other identifiers, preserve and reuse that same set in the follow-up query unless the user asks to change the scope.
+- Prefer the most recent relevant result set when the user refers to "these" or "them".
 """
 
 SYSTEM_PROMPT = f"""{SCHEMA_CONTEXT}
@@ -83,6 +94,7 @@ If the question cannot be answered with the available data, explain why and sugg
 """
 
 SQL_EXTRACT_PROMPT = f"""{SCHEMA_CONTEXT}
+{HISTORY_CONTEXT_GUIDANCE}
 
 You are a SQL generator. Given a user question, output ONLY a single SQL SELECT query (no markdown, no explanation, just raw SQL). The query must be read-only and include LIMIT. If the question cannot be answered, output: SELECT 'Cannot answer this question with available data' AS error;
 """
@@ -103,6 +115,169 @@ def extract_sql(text: str) -> str | None:
     if stripped.upper().startswith("SELECT"):
         return stripped.rstrip(";") + ";"
     return None
+
+
+def _find_matching_paren(text: str, open_idx: int) -> int:
+    """Return the index of the closing paren matching text[open_idx]."""
+    depth = 0
+    in_single = False
+    in_double = False
+    i = open_idx
+
+    while i < len(text):
+        ch = text[i]
+
+        if ch == "'" and not in_double:
+            if in_single and i + 1 < len(text) and text[i + 1] == "'":
+                i += 2
+                continue
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            if in_double and i + 1 < len(text) and text[i + 1] == '"':
+                i += 2
+                continue
+            in_double = not in_double
+        elif not in_single and not in_double:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return i
+        i += 1
+
+    raise ValueError("Unbalanced parentheses in generated SQL.")
+
+
+def _split_top_level_args(text: str) -> list[str]:
+    """Split a function argument list on top-level commas only."""
+    parts = []
+    start = 0
+    depth = 0
+    in_single = False
+    in_double = False
+    i = 0
+
+    while i < len(text):
+        ch = text[i]
+
+        if ch == "'" and not in_double:
+            if in_single and i + 1 < len(text) and text[i + 1] == "'":
+                i += 2
+                continue
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            if in_double and i + 1 < len(text) and text[i + 1] == '"':
+                i += 2
+                continue
+            in_double = not in_double
+        elif not in_single and not in_double:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif ch == "," and depth == 0:
+                parts.append(text[start:i].strip())
+                start = i + 1
+        i += 1
+
+    parts.append(text[start:].strip())
+    return parts
+
+
+def _is_numeric_round_arg(expr: str) -> bool:
+    """Heuristic: whether an expression is already explicitly cast to NUMERIC/DECIMAL."""
+    normalized = re.sub(r"\s+", " ", expr.strip()).upper()
+    if "::NUMERIC" in normalized or "::DECIMAL" in normalized:
+        return True
+    if normalized.startswith("CAST(") and (" AS NUMERIC" in normalized or " AS DECIMAL" in normalized):
+        return True
+    return False
+
+
+def _normalize_round_calls(sql: str) -> str:
+    """Rewrite ROUND(x, n) to ROUND(CAST(x AS NUMERIC), n) when needed."""
+    out = []
+    i = 0
+
+    while i < len(sql):
+        match = re.search(r"\bROUND\s*\(", sql[i:], re.IGNORECASE)
+        if not match:
+            out.append(sql[i:])
+            break
+
+        start = i + match.start()
+        paren_idx = start + match.group(0).rfind("(")
+        out.append(sql[i:start])
+
+        close_idx = _find_matching_paren(sql, paren_idx)
+        inner = _normalize_round_calls(sql[paren_idx + 1:close_idx])
+        args = _split_top_level_args(inner)
+
+        if len(args) == 2 and not _is_numeric_round_arg(args[0]):
+            args[0] = f"CAST({args[0].strip()} AS NUMERIC)"
+
+        rebuilt = f"{sql[start:paren_idx]}({', '.join(args)})"
+        out.append(rebuilt)
+        i = close_idx + 1
+
+    return "".join(out)
+
+
+def normalize_generated_sql(sql: str) -> str:
+    """Apply compatibility fixes to LLM-generated SQL before execution."""
+    return _normalize_round_calls(sql.strip())
+
+
+def _truncate(text: str, max_chars: int = 500) -> str:
+    text = (text or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "…"
+
+
+def _coerce_result_frame(data) -> pd.DataFrame | None:
+    if isinstance(data, pd.DataFrame):
+        return data
+    if isinstance(data, list):
+        return pd.DataFrame(data)
+    return None
+
+
+def build_history_context(history: list[dict] | None, max_messages: int = 6, max_rows: int = 8) -> str:
+    """Render recent chat history into a compact, structured memory block for the LLM."""
+    if not history:
+        return ""
+
+    blocks = []
+    for idx, message in enumerate(history[-max_messages:], start=1):
+        role = message.get("role", "assistant").upper()
+        block_lines = [f"Memory item {idx} ({role})"]
+
+        content = _truncate(message.get("content", ""))
+        if content:
+            block_lines.append(f"Message: {content}")
+
+        sql = message.get("sql")
+        if sql:
+            block_lines.append(f"SQL: {sql.strip()}")
+
+        df = _coerce_result_frame(message.get("data"))
+        if df is not None and not df.empty:
+            block_lines.append("Result rows:")
+            block_lines.append(df.head(max_rows).to_markdown(index=False))
+
+        blocks.append("\n".join(block_lines))
+
+    return "\n\n".join(blocks)
+
+
+def question_with_history(question: str, history: list[dict] | None) -> str:
+    """Combine the current question with structured conversation memory."""
+    history_context = build_history_context(history)
+    if not history_context:
+        return question
+    return f"Conversation memory:\n{history_context}\n\nCurrent user question:\n{question}"
 
 
 _CF_ERROR_TITLE = re.compile(r"<title>([^<]+)</title>", re.IGNORECASE)
@@ -147,31 +322,39 @@ class ChatAgent(ABC):
     """Base class for LLM-powered chat agents."""
 
     @abstractmethod
-    def generate_sql(self, question: str) -> str:
+    def generate_sql(self, question: str, history: list[dict] | None = None) -> str:
         """Given a user question, return a SQL query string."""
         ...
 
     @abstractmethod
-    def summarize(self, question: str, sql: str, results: pd.DataFrame) -> str:
+    def summarize(
+        self,
+        question: str,
+        sql: str,
+        results: pd.DataFrame,
+        history: list[dict] | None = None,
+    ) -> str:
         """Given the question, SQL, and results, return a natural language answer."""
         ...
 
-    def ask(self, question: str, conn) -> dict:
+    def ask(self, question: str, conn, history: list[dict] | None = None) -> dict:
         """Full pipeline: question → SQL → execute → answer."""
         try:
-            sql = self.generate_sql(question)
+            sql = self.generate_sql(question, history=history)
         except Exception as e:
             return {"error": f"LLM error: {_clean_err(e)}", "sql": None, "answer": None}
 
         if not sql:
             return {"error": "Could not generate SQL from the question.", "sql": None, "answer": None}
 
+        sql = normalize_generated_sql(sql)
+
         df, err = execute_sql(conn, sql)
         if err:
             return {"error": err, "sql": sql, "answer": None}
 
         try:
-            answer = self.summarize(question, sql, df)
+            answer = self.summarize(question, sql, df, history=history)
         except Exception as e:
             # Fall back to raw data if summarization fails
             answer = f"(Summarization failed: {_clean_err(e)})\n\nQuery returned {len(df)} rows:\n\n{df.to_markdown(index=False)}"
@@ -189,23 +372,29 @@ class ClaudeAgent(ChatAgent):
         self.client = anthropic.Anthropic(**kwargs)
         self.model = model
 
-    def generate_sql(self, question: str) -> str:
+    def generate_sql(self, question: str, history: list[dict] | None = None) -> str:
         resp = self.client.messages.create(
             model=self.model,
             max_tokens=500,
             system=SQL_EXTRACT_PROMPT,
-            messages=[{"role": "user", "content": question}],
+            messages=[{"role": "user", "content": question_with_history(question, history)}],
         )
         raw = resp.content[0].text
         sql = extract_sql(raw)
         return sql or raw
 
-    def summarize(self, question: str, sql: str, results: pd.DataFrame) -> str:
+    def summarize(
+        self,
+        question: str,
+        sql: str,
+        results: pd.DataFrame,
+        history: list[dict] | None = None,
+    ) -> str:
         data_str = results.head(20).to_markdown(index=False)
         resp = self.client.messages.create(
             model=self.model,
             max_tokens=800,
-            system="You are a casino data analyst. Summarize the query results in a clear, concise answer. Use bullet points for lists. Include key numbers.",
+            system="You are a casino data analyst. Summarize the query results in a clear, concise answer. Use bullet points for lists. Include key numbers. Rewrite technical column names into plain English and avoid snake_case identifiers with underscores.",
             messages=[
                 {"role": "user", "content": f"Question: {question}\n\nSQL executed:\n```sql\n{sql}\n```\n\nResults:\n{data_str}\n\nProvide a concise answer:"},
             ],
@@ -225,26 +414,32 @@ class OpenAIAgent(ChatAgent):
         self.client = openai.OpenAI(**kwargs)
         self.model = model
 
-    def generate_sql(self, question: str) -> str:
+    def generate_sql(self, question: str, history: list[dict] | None = None) -> str:
         resp = self.client.chat.completions.create(
             model=self.model,
             max_tokens=500,
             messages=[
                 {"role": "system", "content": SQL_EXTRACT_PROMPT},
-                {"role": "user", "content": question},
+                {"role": "user", "content": question_with_history(question, history)},
             ],
         )
         raw = resp.choices[0].message.content
         sql = extract_sql(raw)
         return sql or raw
 
-    def summarize(self, question: str, sql: str, results: pd.DataFrame) -> str:
+    def summarize(
+        self,
+        question: str,
+        sql: str,
+        results: pd.DataFrame,
+        history: list[dict] | None = None,
+    ) -> str:
         data_str = results.head(20).to_markdown(index=False)
         resp = self.client.chat.completions.create(
             model=self.model,
             max_tokens=800,
             messages=[
-                {"role": "system", "content": "You are a casino data analyst. Summarize the query results in a clear, concise answer. Use bullet points for lists. Include key numbers."},
+                {"role": "system", "content": "You are a casino data analyst. Summarize the query results in a clear, concise answer. Use bullet points for lists. Include key numbers. Rewrite technical column names into plain English and avoid snake_case identifiers with underscores."},
                 {"role": "user", "content": f"Question: {question}\n\nSQL executed:\n```sql\n{sql}\n```\n\nResults:\n{data_str}\n\nProvide a concise answer:"},
             ],
         )

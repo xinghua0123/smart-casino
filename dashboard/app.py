@@ -8,6 +8,7 @@ Includes an AI chat agent in the sidebar for natural language data exploration.
 
 import os
 import time
+import uuid
 
 import pandas as pd
 import plotly.express as px
@@ -16,10 +17,20 @@ import psycopg2
 import streamlit as st
 
 from agent import create_agent
+from chat_store import SqlChatStore
 
 RW_HOST = os.environ.get("RISINGWAVE_HOST", "localhost")
 RW_PORT = os.environ.get("RISINGWAVE_PORT", "4566")
+RW_USER = os.environ.get("RISINGWAVE_USER", "root")
+RW_DBNAME = os.environ.get("RISINGWAVE_DBNAME", "dev")
 REFRESH_INTERVAL = 5
+CHAT_SESSION_PARAM = "chat_session"
+CHAT_STORE = SqlChatStore.from_env(
+    default_host=RW_HOST,
+    default_port=RW_PORT,
+    default_user=RW_USER,
+    default_dbname=RW_DBNAME,
+)
 
 # --- Last month's daily average baseline (hardcoded) ---
 BASELINE = {
@@ -53,10 +64,66 @@ EXAMPLE_QUESTIONS = [
 def get_connection():
     if "rw_conn" not in st.session_state or st.session_state.rw_conn.closed:
         st.session_state.rw_conn = psycopg2.connect(
-            host=RW_HOST, port=RW_PORT, user="root", dbname="dev"
+            host=RW_HOST, port=RW_PORT, user=RW_USER, dbname=RW_DBNAME
         )
         st.session_state.rw_conn.autocommit = True
     return st.session_state.rw_conn
+
+
+def get_chat_store_connection():
+    if "chat_store_conn" not in st.session_state or st.session_state.chat_store_conn.closed:
+        st.session_state.chat_store_conn = CHAT_STORE.connect()
+        CHAT_STORE.ensure_schema(st.session_state.chat_store_conn)
+    return st.session_state.chat_store_conn
+
+
+def _get_query_param(name: str) -> str | None:
+    value = st.query_params.get(name)
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value or None
+
+
+def _set_query_param(name: str, value: str) -> None:
+    st.query_params[name] = value
+
+
+def _new_chat_session_id() -> str:
+    return uuid.uuid4().hex
+
+
+def get_chat_session_id() -> str:
+    if "chat_session_id" not in st.session_state:
+        session_id = _get_query_param(CHAT_SESSION_PARAM) or _new_chat_session_id()
+        st.session_state.chat_session_id = session_id
+        _set_query_param(CHAT_SESSION_PARAM, session_id)
+    return st.session_state.chat_session_id
+
+
+def load_chat_history() -> list[dict]:
+    conn = get_chat_store_connection()
+    return CHAT_STORE.load_messages(conn, get_chat_session_id())
+
+
+def append_chat_message(message: dict) -> None:
+    st.session_state.chat_history.append(message)
+    conn = get_chat_store_connection()
+    CHAT_STORE.append_message(
+        conn,
+        get_chat_session_id(),
+        len(st.session_state.chat_history) - 1,
+        message,
+    )
+
+
+def clear_chat_session() -> None:
+    conn = get_chat_store_connection()
+    CHAT_STORE.clear_session(conn, get_chat_session_id())
+    st.session_state.chat_history = []
+    st.session_state.chat_active = False
+    st.session_state.pop("pending_question", None)
+    st.session_state.chat_session_id = _new_chat_session_id()
+    _set_query_param(CHAT_SESSION_PARAM, st.session_state.chat_session_id)
 
 
 def query(sql: str) -> pd.DataFrame:
@@ -76,6 +143,12 @@ def query(sql: str) -> pd.DataFrame:
 
 # --- Page config ---
 st.set_page_config(page_title="Smart Casino Floor", layout="wide")
+
+_ = get_chat_session_id()
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = load_chat_history()
+if "chat_active" not in st.session_state:
+    st.session_state.chat_active = False
 
 # ================================================================
 # Sidebar: AI Chat Agent
@@ -115,12 +188,6 @@ with st.sidebar:
                                   placeholder="https://your-resource.openai.azure.com/")
         azure_model = st.text_input("Deployment Name", value="gpt-4o", key="azure_model")
 
-    # --- Chat state ---
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    if "chat_active" not in st.session_state:
-        st.session_state.chat_active = False
-
     st.divider()
 
     # --- Display chat history ---
@@ -156,7 +223,7 @@ with st.sidebar:
         if not (st.session_state.chat_history and
                 st.session_state.chat_history[-1].get("role") == "user" and
                 st.session_state.chat_history[-1].get("content") == q):
-            st.session_state.chat_history.append({"role": "user", "content": q})
+            append_chat_message({"role": "user", "content": q})
             st.session_state.chat_active = True
             with st.chat_message("user"):
                 st.markdown(q)
@@ -166,8 +233,7 @@ with st.sidebar:
     # --- Clear chat button ---
     if st.session_state.chat_history:
         if st.button("Clear Chat", use_container_width=True):
-            st.session_state.chat_history = []
-            st.session_state.chat_active = False
+            clear_chat_session()
             st.rerun()
 
     # --- Resume auto-refresh toggle ---
@@ -450,7 +516,7 @@ with bottom_right:
 if "pending_question" in st.session_state:
     q = st.session_state.pop("pending_question")
     if not api_key:
-        st.session_state.chat_history.append({
+        append_chat_message({
             "role": "assistant",
             "content": "Please enter your API key in the sidebar to use the chat agent.",
         })
@@ -475,23 +541,24 @@ if "pending_question" in st.session_state:
 
             agent = create_agent(provider, api_key, **kwargs)
             conn = get_connection()
-            result = agent.ask(q, conn)
+            history_for_agent = st.session_state.chat_history[:-1]
+            result = agent.ask(q, conn, history=history_for_agent)
 
             if result.get("error"):
-                st.session_state.chat_history.append({
+                append_chat_message({
                     "role": "assistant",
                     "content": f"Error: {result['error']}",
                     "sql": result.get("sql"),
                 })
             else:
-                st.session_state.chat_history.append({
+                append_chat_message({
                     "role": "assistant",
                     "content": result["answer"],
                     "sql": result.get("sql"),
                     "data": result.get("data"),
                 })
         except Exception as e:
-            st.session_state.chat_history.append({
+            append_chat_message({
                 "role": "assistant",
                 "content": f"Agent error: {e}",
             })

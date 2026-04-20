@@ -73,24 +73,36 @@ LEFT JOIN mv_player_features f
 -- ============================================================
 
 -- High Roller Radar: top emerging candidates
+-- Keep only the latest row per player so candidate rankings are unique by player_id.
 CREATE MATERIALIZED VIEW mv_high_roller_radar AS
 SELECT
-    player_id,
-    tier,
-    archetype,
-    high_roller_similarity,
-    avg_bet,
-    cumulative_gaming_spend,
-    cumulative_fnb_spend,
-    spend_per_minute,
-    category_diversity,
-    theo_win_window,
-    cumulative_theo_win,
-    effective_house_edge,
-    window_start
-FROM mv_player_high_roller_similarity
-WHERE archetype != 'high_roller'
-  AND high_roller_similarity > 0.4;
+    s.player_id,
+    s.tier,
+    s.archetype,
+    s.high_roller_similarity,
+    s.avg_bet,
+    s.cumulative_gaming_spend,
+    s.cumulative_fnb_spend,
+    s.spend_per_minute,
+    s.category_diversity,
+    s.theo_win_window,
+    s.cumulative_theo_win,
+    s.effective_house_edge,
+    s.window_start
+FROM mv_player_high_roller_similarity AS s
+JOIN (
+    SELECT
+        player_id,
+        MAX(window_start) AS latest_window_start
+    FROM mv_player_high_roller_similarity
+    WHERE archetype != 'high_roller'
+      AND high_roller_similarity > 0.4
+    GROUP BY player_id
+) AS latest
+    ON s.player_id = latest.player_id
+   AND s.window_start = latest.latest_window_start
+WHERE s.archetype != 'high_roller'
+  AND s.high_roller_similarity > 0.4;
 
 
 -- Theo-win breakdown by tier (for the dashboard bar chart)
