@@ -1,50 +1,104 @@
-# Smart Casino Floor — Real-Time Gaming Recommendation with ML
+# Smart Casino Floor — Real-Time Gaming Analytics with RisingWave + ML
 
-A demo showing RisingWave as a real-time ML feature store for personalized gaming recommendations, churn prediction, and high-roller lookalike detection.
+A reference demo showing **RisingWave** as a streaming feature store for personalized gaming recommendations, churn prediction, high-roller lookalike detection, and the industry-standard **Theoretical Win (Theo Win)** / **House Advantage** economics — all computed in real time over Kafka streams. Ships with a Streamlit dashboard and an embedded LLM chat agent.
 
 ## Architecture
 
+![Architecture](./architecture.png)
+
+**Data flow in one paragraph:** A producer emits gaming / F&B / hotel events into 3 Kafka topics. RisingWave ingests via Kafka sources and builds a stack of materialized views — 5-minute tumbling session features, running theo-win / house-edge aggregates, high-roller similarity scoring, and a unified `mv_player_features`. A Python ML service queries those MVs every 10s, runs four scikit-learn models, and writes predictions back into RisingWave via plain SQL INSERT. A final `mv_actionable_recommendations` MV layers business rules on top of the predictions, scaling offer values as a % of cumulative theo-win. The Streamlit dashboard queries the dashboard-facing MVs for live KPIs and charts, and its sidebar hosts a pluggable LLM chat agent that translates natural-language questions into SQL against the same MVs.
+
+## Theoretical Win & House Advantage
+
+These are the two most important metrics in casino marketing, now first-class features in the pipeline.
+
+**House Advantage (house edge)** — the statistical percentage the casino wins from each bet, per game type:
+
+| Game      | House Edge |
+|-----------|-----------:|
+| Slots     |      7.50% |
+| Roulette  |      5.26% |
+| Blackjack |      0.75% |
+| Poker     |      2.50% |
+
+**Theoretical Win** — the casino's *expected* profit from a player's wagering, independent of short-term luck:
+
 ```
-Kafka Topics                    RisingWave                         ML Service (Python)
-─────────────                   ──────────                         ───────────────────
-gaming_events ──┐
-fnb_events    ──┼──► Source Tables ──► Feature MVs ──────────────► scikit-learn Models
-hotel_events  ──┘         │              │                              │
-                          │         (session stats,                (predictions)
-                          │          game preferences,                  │
-                          │          HR similarity)                     ▼
-                          │                                    Kafka: recommendations
-                          │         Recommendation MV ◄────────────────┘
-                          │              │
-                          ▼              ▼
-                     Business Rules   Streamlit Dashboard (localhost:8501)
+theo_win = Σ ( bet_amount × house_edge_of_that_game )
 ```
+
+Computed inline in `mv_player_session_features` per bet, then aggregated:
+- `theo_win_window` — sum per 5-minute TUMBLE window (live KPI)
+- `cumulative_theo_win` — running per-player lifetime total (in `mv_player_theo_cumulative`)
+- `effective_house_edge` = `cumulative_theo_win / cumulative_wagered` — blended edge given the player's actual game mix (a blackjack-heavy whale has a lower effective edge than a slots-heavy grinder, even at the same wager volume)
+
+**Why this matters:** reinvestment (comps, offers) in real casinos is set as a **percentage of cumulative theo**, not of wagered volume. `mv_actionable_recommendations` implements exactly this:
+
+| action_type              | offer_value (reinvestment) |
+|--------------------------|---------------------------:|
+| `URGENT_RETENTION`       | 40% of cumulative theo     |
+| `VIP_UPGRADE_CANDIDATE`  | 35% of cumulative theo     |
+| `RETENTION_OFFER`        | 25% of cumulative theo     |
+| `STANDARD_RECOMMENDATION`| 15% of cumulative theo     |
+
+(With an `avg_bet` floor so brand-new players with no theo history still get a sensible offer.)
 
 ## Components
 
 | Component | Description |
 |-----------|-------------|
-| **data_producer** | Generates realistic event streams for 200 simulated players across 4 archetypes (casual, regular, high_roller, emerging) |
-| **risingwave_sql** | 4 SQL files: Kafka sources, feature MVs (5-min windows), high-roller similarity scoring, recommendation delivery with business rules |
-| **ml_service** | Trains 4 models on synthetic data (next-game, churn, offer sensitivity, HR trajectory), then runs inference loop querying RisingWave every 10s |
-| **dashboard** | Streamlit app with KPI metrics, High Roller Radar scatter plot, recommendation table, game/tier distributions |
+| **data_producer** | Generates realistic event streams across 4 archetypes: `casual` (50%, low bets, mostly slots), `regular` (30%, mixed games), `high_roller` (12%, high bets, table games), `emerging` (8%, gradually escalating bets — the key lookalike target). |
+| **risingwave_sql** | 4 SQL files: Kafka sources, feature MVs (TUMBLE windows + theo-win), high-roller similarity scoring (now weighted 20% on cumulative theo), recommendation delivery with business rules. |
+| **ml_service** | Trains 4 scikit-learn models on synthetic data, then runs an inference loop querying RisingWave every 10s and writing predictions back via SQL INSERT. |
+| **dashboard** | Streamlit app with live KPIs (incl. Theo Win window + Effective House Edge), High Roller Radar scatter plot, Theo-by-Tier chart, recommendation table, and a sidebar **LLM chat agent** with pluggable provider support. |
 
 ## ML Models
 
-1. **Next-Best-Game** (Random Forest) — recommends cross-sell game based on current play pattern
-2. **Churn Probability** (Gradient Boosted Regressor) — predicts likelihood of player leaving
-3. **Offer Sensitivity** (Random Forest) — which reward type converts best (free play, F&B voucher, hotel upgrade, cashback)
-4. **High-Roller Trajectory** (Gradient Boosted Classifier) — is this player on track to become a high roller?
+1. **Next-Best-Game** (Random Forest) — cross-sell game suggestion based on current play pattern
+2. **Churn Probability** (Gradient Boosted Regressor) — likelihood the player leaves soon
+3. **Offer Sensitivity** (Random Forest) — which reward converts best: free_play / fnb_voucher / hotel_upgrade / cashback
+4. **High-Roller Trajectory** (Gradient Boosted Classifier) — is this player on track to become a VIP?
+
+## Key Materialized Views
+
+| MV | What it holds |
+|---|---|
+| `mv_player_session_features`    | Per-player 5-min TUMBLE gaming stats + `theo_win_window` |
+| `mv_player_fnb_features`        | 5-min F&B spend per player |
+| `mv_player_hotel_features`      | 5-min hotel activity per player |
+| `mv_player_theo_cumulative`     | **Running per-player `cumulative_theo_win`, `cumulative_wagered`, `effective_house_edge`** |
+| `mv_player_features`            | Unified feature store — one row per player per window |
+| `mv_player_high_roller_similarity` | Weighted similarity score (0–1) incl. 20% weight on cumulative theo |
+| `recommendations_tbl`           | Latest ML predictions (upserted every 10s by the inference service) |
+| `mv_actionable_recommendations` | ML predictions + business rules + theo-based offer value |
+| `mv_high_roller_radar`          | Non-VIP players with HR similarity > 0.4 |
+| `mv_theo_by_tier`               | Per-tier aggregation: total theo, avg theo, avg effective edge |
+| `mv_dashboard_stats`            | Top-line rollup for dashboard KPIs |
+
+## LLM Chat Agent
+
+The dashboard sidebar hosts a natural-language agent that translates questions into SQL against the MVs above, runs them, and summarizes the results.
+
+- **Pluggable providers:** Claude (Anthropic), OpenAI, OpenRouter, Azure OpenAI
+- **Custom `base_url` support** for proxy/gateway routing (PackyAPI, OpenRouter, LiteLLM, etc.)
+- Schema-aware system prompt — understands every MV column including `theo_win_window`, `cumulative_theo_win`, `effective_house_edge`
+- Read-only enforcement: only `SELECT` queries are executed
+
+Sample questions:
+- "Who are the top 5 players by cumulative theo win?"
+- "What's the average effective house edge for diamond tier players?"
+- "Which tier produces the most theo per player?"
+- "How many VIP upgrade candidates are there and what's their average offer value?"
 
 ## Key RisingWave Features Demonstrated
 
 - `TUMBLE()` windows for real-time feature engineering
+- Streaming cumulative aggregates (no windows) for lifetime-value metrics
 - Materialized views as a streaming feature store
-- Cross-source JOIN for multi-category player profiles
-- High-roller reference profile (continuously updated centroid)
-- Cosine-like similarity scoring in SQL
-- ML prediction feedback loop (predictions ingested back as a source)
-- Business rule layer on top of ML predictions
+- Multi-source JOINs for cross-category player profiles
+- Inline house-edge lookup via `CASE` expressions in streaming aggregates
+- Closed ML loop: predictions INSERTed back into RW, re-joined by another MV
+- Business-rule layer (actionable recommendations) expressed purely in SQL
 
 ## Quick Start
 
@@ -54,28 +108,49 @@ cd smart-casino-floor
 # Start everything
 docker compose up --build
 
-# Wait ~30s for services to initialize, then open:
+# Wait ~45s for services to initialize, then open:
 #   Dashboard:  http://localhost:8501
 #   RisingWave: psql -h localhost -p 4566 -U root -d dev
 ```
 
+For the LLM chat agent, open the dashboard sidebar, pick a provider, paste an API key (optionally a custom `base_url` for proxies), and ask away.
+
 ## Explore the Data
 
 ```sql
--- Player features (real-time)
-SELECT * FROM mv_player_features LIMIT 10;
+-- Live per-window player features incl. theo win
+SELECT player_id, tier, avg_bet,
+       ROUND(theo_win_window::numeric, 2)        AS theo_win_window,
+       ROUND(cumulative_theo_win::numeric, 2)    AS cumulative_theo,
+       ROUND(effective_house_edge::numeric, 4)   AS effective_edge
+FROM mv_player_features
+ORDER BY theo_win_window DESC NULLS LAST
+LIMIT 10;
 
--- High roller radar
-SELECT player_id, high_roller_similarity, avg_bet, spend_per_minute
-FROM mv_high_roller_radar ORDER BY high_roller_similarity DESC LIMIT 10;
+-- House edge by tier (diamond/platinum typically lowest — they play blackjack/poker)
+SELECT tier,
+       ROUND(total_theo_win::numeric, 0)            AS total_theo,
+       ROUND(avg_theo_per_player::numeric, 0)       AS avg_theo_per_player,
+       ROUND(avg_effective_house_edge::numeric, 4)  AS avg_edge
+FROM mv_theo_by_tier
+ORDER BY total_theo DESC;
 
--- ML recommendations with business rules
-SELECT player_id, next_best_game, action_type, churn_probability, high_roller_trajectory
+-- Emerging high rollers (non-VIP lookalikes)
+SELECT player_id, high_roller_similarity,
+       avg_bet, spend_per_minute, cumulative_theo_win
+FROM mv_high_roller_radar
+ORDER BY high_roller_similarity DESC
+LIMIT 10;
+
+-- Actionable recommendations with theo-based offers
+SELECT player_id, action_type, next_best_game,
+       ROUND(churn_probability::numeric, 3) AS churn,
+       ROUND(cumulative_theo_win::numeric, 0) AS theo,
+       ROUND(offer_value::numeric, 0) AS offer
 FROM mv_actionable_recommendations
-WHERE action_type = 'VIP_UPGRADE_CANDIDATE';
-
--- High roller reference profile
-SELECT * FROM mv_high_roller_reference_profile;
+WHERE action_type IN ('URGENT_RETENTION', 'VIP_UPGRADE_CANDIDATE')
+ORDER BY offer_value DESC
+LIMIT 20;
 ```
 
 ## Cleanup
