@@ -27,13 +27,13 @@ CREATE TABLE tables_dim (
     limit_max   DOUBLE PRECISION
 );
 
--- Macau-style floor. Baccarat is the hero: a large standard pit in the
--- middle-right plus a VIP room on the top-right. Slots dominate the left
--- (casual volume). Blackjack is a secondary pit. Roulette & poker are
--- intentionally minor (2 tables each) — they do not drive theo on an
--- Asian floor.
+-- Macau-style 3-game floor: slots, baccarat (hero), blackjack.
+--   Slots (left):     8 penny + 8 standard    = 16 tables (casual volume)
+--   Baccarat (mid):   8 standard + 8 VIP      = 16 tables (the hero)
+--   Blackjack (right): 4 tables                =  4 tables (secondary pit)
+-- Total 36 tables.
 --
--- Penny slots — 4x2 (low limits, near entrance)
+-- Penny slots — 4x2 (low limits, near entrance, top-left)
 INSERT INTO tables_dim VALUES
     ('slots_01', 'slots',  0.60, 7.80,  1.0,  10.0),
     ('slots_02', 'slots',  1.80, 7.80,  1.0,  10.0),
@@ -43,7 +43,7 @@ INSERT INTO tables_dim VALUES
     ('slots_06', 'slots',  1.80, 8.80,  1.0,  10.0),
     ('slots_07', 'slots',  3.00, 8.80,  1.0,  10.0),
     ('slots_08', 'slots',  4.20, 8.80,  1.0,  10.0),
--- Standard slots — 4x2
+-- Standard slots — 4x2 (mid-left)
     ('slots_09', 'slots',  0.60, 3.50,  5.0,  25.0),
     ('slots_10', 'slots',  1.80, 3.50,  5.0,  25.0),
     ('slots_11', 'slots',  3.00, 3.50,  5.0,  25.0),
@@ -52,32 +52,29 @@ INSERT INTO tables_dim VALUES
     ('slots_14', 'slots',  1.80, 4.50,  5.0,  25.0),
     ('slots_15', 'slots',  3.00, 4.50,  5.0,  25.0),
     ('slots_16', 'slots',  4.20, 4.50,  5.0,  25.0),
--- Blackjack standard pit — 2x2 (trimmed from 2x3 to free middle-floor for baccarat)
-    ('bj_01',    'blackjack', 5.80, 3.00,  25.0, 500.0),
-    ('bj_02',    'blackjack', 7.00, 3.00,  25.0, 500.0),
-    ('bj_03',    'blackjack', 5.80, 4.50,  25.0, 500.0),
-    ('bj_04',    'blackjack', 7.00, 4.50,  25.0, 500.0),
--- High-limit blackjack — 2 tables at top
-    ('bj_05',    'blackjack', 5.80, 7.50, 500.0, 2000.0),
-    ('bj_06',    'blackjack', 7.00, 7.50, 500.0, 2000.0),
--- ——— BACCARAT (the hero) — standard 4x2 pit, center-right ———
-    ('bac_01',   'baccarat',  8.40, 3.50, 100.0,  500.0),
-    ('bac_02',   'baccarat',  9.60, 3.50, 100.0,  500.0),
-    ('bac_03',   'baccarat', 10.80, 3.50, 100.0,  500.0),
-    ('bac_04',   'baccarat', 12.00, 3.50, 100.0,  500.0),
-    ('bac_05',   'baccarat',  8.40, 4.50, 100.0,  500.0),
-    ('bac_06',   'baccarat',  9.60, 4.50, 100.0,  500.0),
-    ('bac_07',   'baccarat', 10.80, 4.50, 100.0,  500.0),
-    ('bac_08',   'baccarat', 12.00, 4.50, 100.0,  500.0),
--- ——— BACCARAT VIP — 2 high-limit tables (velvet rope) ———
-    ('bac_vip_01','baccarat', 10.80, 7.50,  500.0, 10000.0),
-    ('bac_vip_02','baccarat', 12.00, 7.50,  500.0, 10000.0),
--- Roulette — 2 wheels only (small share on a Macau floor) — front row
-    ('rou_01',   'roulette',  6.20, 1.00, 10.0, 200.0),
-    ('rou_02',   'roulette',  7.40, 1.00, 10.0, 200.0),
--- Poker — 2 tables only (small share) — front-right
-    ('pok_01',   'poker',     9.00, 1.00, 50.0, 1000.0),
-    ('pok_02',   'poker',    10.20, 1.00, 50.0, 1000.0);
+-- ——— BACCARAT standard pit — 4x2, center of floor ———
+    ('bac_01',   'baccarat',  5.80, 3.50, 100.0,  500.0),
+    ('bac_02',   'baccarat',  7.00, 3.50, 100.0,  500.0),
+    ('bac_03',   'baccarat',  8.20, 3.50, 100.0,  500.0),
+    ('bac_04',   'baccarat',  9.40, 3.50, 100.0,  500.0),
+    ('bac_05',   'baccarat',  5.80, 4.50, 100.0,  500.0),
+    ('bac_06',   'baccarat',  7.00, 4.50, 100.0,  500.0),
+    ('bac_07',   'baccarat',  8.20, 4.50, 100.0,  500.0),
+    ('bac_08',   'baccarat',  9.40, 4.50, 100.0,  500.0),
+-- ——— BACCARAT VIP — 4x2 high-limit room, top-center ———
+    ('bac_vip_01','baccarat', 5.80, 7.50,  500.0, 10000.0),
+    ('bac_vip_02','baccarat', 7.00, 7.50,  500.0, 10000.0),
+    ('bac_vip_03','baccarat', 8.20, 7.50,  500.0, 10000.0),
+    ('bac_vip_04','baccarat', 9.40, 7.50,  500.0, 10000.0),
+    ('bac_vip_05','baccarat', 5.80, 8.50,  500.0, 10000.0),
+    ('bac_vip_06','baccarat', 7.00, 8.50,  500.0, 10000.0),
+    ('bac_vip_07','baccarat', 8.20, 8.50,  500.0, 10000.0),
+    ('bac_vip_08','baccarat', 9.40, 8.50,  500.0, 10000.0),
+-- Blackjack — single 2x2 pit on the right
+    ('bj_01',    'blackjack', 11.20, 3.50, 25.0, 500.0),
+    ('bj_02',    'blackjack', 12.40, 3.50, 25.0, 500.0),
+    ('bj_03',    'blackjack', 11.20, 4.50, 25.0, 500.0),
+    ('bj_04',    'blackjack', 12.40, 4.50, 25.0, 500.0);
 
 
 -- 5-min tumbling per-table activity
@@ -102,9 +99,7 @@ SELECT
         CASE game_type
             WHEN 'slots'     THEN bet_amount * 0.0750
             WHEN 'baccarat'  THEN bet_amount * 0.0115
-            WHEN 'roulette'  THEN bet_amount * 0.0526
             WHEN 'blackjack' THEN bet_amount * 0.0075
-            WHEN 'poker'     THEN bet_amount * 0.0250
             ELSE 0.0
         END
     )                              AS theo_win_window

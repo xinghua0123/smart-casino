@@ -27,9 +27,7 @@ These are the two most important metrics in casino marketing, now first-class fe
 |-----------|-----------:|-------|
 | Slots     |      7.50% | Highest edge, smallest average bet — casual volume leader |
 | Baccarat  |      1.15% | **The Macau hero: ~88% of Macau GGR.** Tiny edge × enormous volume = biggest theo contributor |
-| Roulette  |      5.26% | Minor on Asian floors |
 | Blackjack |      0.75% | Secondary pit game |
-| Poker     |      2.50% | Rake-equivalent vs. house; minor share |
 
 **Theoretical Win** — the casino's *expected* profit from a player's wagering, independent of short-term luck:
 
@@ -84,7 +82,7 @@ Computed inline in `mv_player_session_features` per bet, then aggregated:
 | `mv_high_roller_radar`          | Non-VIP players with HR similarity > 0.4, keeping only the latest row per `player_id` for unique candidate ranking |
 | `mv_theo_by_tier`               | Per-tier aggregation: total theo, avg theo, avg effective edge |
 | `mv_dashboard_stats`            | Top-line rollup for dashboard KPIs |
-| `tables_dim`                    | Static dimension table (36 physical tables, Macau-style — 16 slots, 8 baccarat standard + 2 VIP, 4 blackjack + 2 high-limit, 2 roulette, 2 poker) — `table_id`, `game_type`, `(x, y)`, `limit_min`, `limit_max` |
+| `tables_dim`                    | Static dimension table (36 physical tables, clean Macau 3-game floor — 16 slots (8 penny + 8 standard), 16 baccarat (8 standard + 8 VIP), 4 blackjack) — `table_id`, `game_type`, `(x, y)`, `limit_min`, `limit_max` |
 | `mv_table_activity`             | Per-table 5-min TUMBLE: active_players, bets, avg_bet, theo_win_window, max_bet |
 | `mv_table_latest`               | Latest window per table (deduplicated "right now" view) |
 | `mv_table_recommendations`      | Floor-plan view: LEFT JOIN of `tables_dim` with latest activity, plus a business-rule `action_type` (RAISE_LIMIT / LOWER_LIMIT / HOT / COLD / HOLD) and suggested new limit range |

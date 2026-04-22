@@ -20,15 +20,15 @@ TOPICS = {
 
 # --- Player archetypes -----------------------------------------------------------
 
-# Game-mix priors per archetype. Tuned for a Macau-style floor where baccarat
-# dominates high-limit play (~88% of Macau GGR is baccarat) and slots dominate
-# casual volume. Roulette and poker are intentionally small — they don't move
+# Game-mix priors per archetype. Macau-style 3-game floor: baccarat is the
+# hero (~88% of Macau GGR), slots carry casual volume, blackjack is the
+# secondary pit. Roulette and poker have been removed — they do not move
 # the needle on theo win in the Asian market.
 ARCHETYPES = {
     "casual": {
         "weight": 0.50,
         # Casual: mostly slots, some entry-level baccarat / blackjack.
-        "games": {"slots": 0.60, "baccarat": 0.18, "blackjack": 0.10, "roulette": 0.08, "poker": 0.04},
+        "games": {"slots": 0.68, "baccarat": 0.20, "blackjack": 0.12},
         "avg_bet": (5, 25),
         "session_gap_s": (60, 300),
         "fnb_prob": 0.15,
@@ -38,7 +38,7 @@ ARCHETYPES = {
     "regular": {
         "weight": 0.30,
         # Regulars lean into baccarat (the Asian staple) + blackjack; slots are a filler.
-        "games": {"baccarat": 0.40, "blackjack": 0.22, "slots": 0.18, "roulette": 0.10, "poker": 0.10},
+        "games": {"baccarat": 0.52, "blackjack": 0.28, "slots": 0.20},
         "avg_bet": (25, 100),
         "session_gap_s": (30, 180),
         "fnb_prob": 0.25,
@@ -48,7 +48,7 @@ ARCHETYPES = {
     "high_roller": {
         "weight": 0.12,
         # High rollers are a baccarat VIP segment first, blackjack second.
-        "games": {"baccarat": 0.55, "blackjack": 0.25, "poker": 0.10, "roulette": 0.07, "slots": 0.03},
+        "games": {"baccarat": 0.65, "blackjack": 0.30, "slots": 0.05},
         "avg_bet": (200, 2000),
         "session_gap_s": (15, 90),
         "fnb_prob": 0.40,
@@ -58,7 +58,7 @@ ARCHETYPES = {
     "emerging": {
         "weight": 0.08,
         # Upwardly mobile — testing baccarat VIP while still playing the pit.
-        "games": {"baccarat": 0.38, "blackjack": 0.25, "slots": 0.15, "poker": 0.12, "roulette": 0.10},
+        "games": {"baccarat": 0.48, "blackjack": 0.32, "slots": 0.20},
         "avg_bet": (50, 300),
         "session_gap_s": (20, 120),
         "fnb_prob": 0.30,
@@ -67,7 +67,7 @@ ARCHETYPES = {
     },
 }
 
-GAME_TYPES = ["slots", "baccarat", "blackjack", "roulette", "poker"]
+GAME_TYPES = ["slots", "baccarat", "blackjack"]
 
 # --- Physical casino floor layout ------------------------------------------------
 # Each table has a fixed (x, y) position on the floor, a game_type, and a live
@@ -76,45 +76,37 @@ GAME_TYPES = ["slots", "baccarat", "blackjack", "roulette", "poker"]
 # the limit should be raised (packed + betting near ceiling) or lowered
 # (cold + few players). Keep this in sync with `tables_dim` seed in 05_floor_plan_mvs.sql.
 #
-#   Macau-style layout. Baccarat is the hero — the standard pit is the biggest
-#   footprint on the floor and there is a dedicated VIP baccarat room. Slots
-#   still cluster on the left for casual foot traffic. Blackjack sits between
-#   slots and baccarat. Roulette & poker are intentionally minimal (they do
-#   not drive theo win on an Asian floor).
+#   Macau-style 3-game layout.
+#     Slots (left):    8 penny + 8 standard  = 16 tables — casual volume
+#     Baccarat (mid):  8 standard + 8 VIP    = 16 tables — the hero
+#     Blackjack (rgt): 4 tables              =  4 tables — secondary pit
+#   Total 36 tables.
 TABLE_LAYOUT: list[tuple[str, str, float, float, float, float]] = (
-    # Penny slots cluster (low limits, near entrance) — 4x2 grid
+    # Penny slots — 4x2 grid (low limits, near entrance, top-left)
     [(f"slots_{i:02d}", "slots",
       0.6 + ((i - 1) % 4) * 1.2,
       7.8 + ((i - 1) // 4) * 1.0,
       1.0, 10.0) for i in range(1, 9)]
-    # Standard slots cluster (mid limits) — 4x2 grid
+    # Standard slots — 4x2 grid (mid-left)
     + [(f"slots_{i:02d}", "slots",
         0.6 + ((i - 9) % 4) * 1.2,
         3.5 + ((i - 9) // 4) * 1.0,
         5.0, 25.0) for i in range(9, 17)]
-    # Blackjack standard pit — 2x2 grid (trimmed from 2x3 to free middle-floor space)
-    + [(f"bj_{i:02d}", "blackjack",
-        5.8 + ((i - 1) % 2) * 1.2,
-        3.0 + ((i - 1) // 2) * 1.5,
-        25.0, 500.0) for i in range(1, 5)]
-    # High-limit blackjack tables — 2 tables (side by side) at top-mid
-    + [("bj_05", "blackjack", 5.8, 7.5, 500.0, 2000.0),
-       ("bj_06", "blackjack", 7.0, 7.5, 500.0, 2000.0)]
-    # ——— BACCARAT (the hero) — standard 4x2 pit, center-right of the floor ———
-    # Macau-realistic mid-limits; this is where most bets land.
+    # ——— BACCARAT standard pit — 4x2 grid, center of floor ———
     + [(f"bac_{i:02d}", "baccarat",
-        8.4 + ((i - 1) % 4) * 1.2,
+        5.8 + ((i - 1) % 4) * 1.2,
         3.5 + ((i - 1) // 4) * 1.0,
         100.0, 500.0) for i in range(1, 9)]
-    # ——— BACCARAT VIP — 2 high-limit tables behind velvet rope ———
-    + [("bac_vip_01", "baccarat", 10.8, 7.5,  500.0, 10000.0),
-       ("bac_vip_02", "baccarat", 12.0, 7.5,  500.0, 10000.0)]
-    # Roulette — only 2 wheels (Macau runs very little roulette) — front row
-    + [("rou_01", "roulette", 6.2, 1.0, 10.0, 200.0),
-       ("rou_02", "roulette", 7.4, 1.0, 10.0, 200.0)]
-    # Poker — only 2 tables (again, minor on an Asian floor) — front-right
-    + [("pok_01", "poker", 9.0, 1.0,  50.0, 1000.0),
-       ("pok_02", "poker", 10.2, 1.0, 50.0, 1000.0)]
+    # ——— BACCARAT VIP room — 4x2 grid (top-center/right), behind velvet rope ———
+    + [(f"bac_vip_{i:02d}", "baccarat",
+        5.8 + ((i - 1) % 4) * 1.2,
+        7.5 + ((i - 1) // 4) * 1.0,
+        500.0, 10000.0) for i in range(1, 9)]
+    # Blackjack — single 2x2 pit on the right
+    + [(f"bj_{i:02d}", "blackjack",
+        11.2 + ((i - 1) % 2) * 1.2,
+        3.5 + ((i - 1) // 2) * 1.0,
+        25.0, 500.0) for i in range(1, 5)]
 )
 
 # Group tables by game_type for fast lookup
@@ -200,7 +192,7 @@ def generate_gaming_event(player: Player) -> dict:
     # Pick a physical table on the floor — bet range must match the table limits.
     table_id, _, table_x, table_y, limit_min, limit_max = pick_table(game, bet)
     # Win probability varies by game — baccarat is near 50/50 (tiny house edge).
-    win_probs = {"slots": 0.35, "roulette": 0.45, "blackjack": 0.48, "poker": 0.42, "baccarat": 0.49}
+    win_probs = {"slots": 0.35, "blackjack": 0.48, "baccarat": 0.49}
     won = random.random() < win_probs.get(game, 0.40)
     payout = round(bet * random.uniform(1.5, 5.0), 2) if won else 0.0
     player.total_gaming_spend += bet

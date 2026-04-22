@@ -523,8 +523,6 @@ GAME_SYMBOLS = {
     "slots":     "square",
     "baccarat":  "star",
     "blackjack": "circle",
-    "roulette":  "diamond",
-    "poker":     "hexagon",
 }
 
 if not floor_df.empty:
@@ -549,7 +547,7 @@ if not floor_df.empty:
         MARKER_SIZE = 18  # Fixed pixel size for every tile. Do not derive from data.
 
         fig_floor = go.Figure()
-        for game in ["slots", "baccarat", "blackjack", "roulette", "poker"]:
+        for game in ["slots", "baccarat", "blackjack"]:
             symbol = GAME_SYMBOLS[game]
             game_rows = plot_df[plot_df["game_type"] == game]
             if game_rows.empty:
@@ -609,25 +607,19 @@ if not floor_df.empty:
                 xanchor="center", yanchor="middle",
             )
 
-        # Penny slots cluster: tiles at y=7.8 & 8.8  → label above, clear of top row
-        _pit_label(2.4, 10.2, "SLOTS (penny)")
-        # Standard slots cluster: tiles at y=3.5 & 4.5 → label above (below bj pit x range)
-        _pit_label(2.4,  5.6, "SLOTS (standard)")
-        # Blackjack pit (standard): tiles at y=3.0 & 4.5 → label above top row
-        _pit_label(6.4,  5.6, "BLACKJACK pit")
-        # High-limit BJ: tiles at y=7.5 → label above
-        _pit_label(6.4,  8.5, "High-limit BJ")
-        # ——— BACCARAT hero pit: tiles at y=3.5 & 4.5, x=8.4-12.0 → label above ———
-        _pit_label(10.2, 5.6, "BACCARAT pit")
-        # BACCARAT VIP: tiles at y=7.5, x=10.8 & 12.0 → label above
-        _pit_label(11.4, 8.5, "BACCARAT VIP")
-        # Roulette: 2 tables on front row at y=1.0 → label above, centered
-        _pit_label(6.8,  1.95, "Roulette")
-        # Poker: 2 tables on front row at y=1.0 → label above, centered
-        _pit_label(9.6,  1.95, "Poker")
+        # Penny slots cluster: tiles at y=7.8 & 8.8 → label above top row
+        _pit_label(2.4, 10.1, "SLOTS (penny)")
+        # Standard slots cluster: tiles at y=3.5 & 4.5 → label above top row
+        _pit_label(2.4,  5.7, "SLOTS (standard)")
+        # ——— BACCARAT standard pit: tiles at y=3.5 & 4.5, x=5.8-9.4 → label above ———
+        _pit_label(7.6,  5.7, "BACCARAT pit")
+        # ——— BACCARAT VIP room: tiles at y=7.5 & 8.5, x=5.8-9.4 → label above ———
+        _pit_label(7.6, 10.1, "BACCARAT VIP")
+        # Blackjack pit: tiles at y=3.5 & 4.5, x=11.2-12.4 → label above
+        _pit_label(11.8, 5.7, "BLACKJACK")
 
-        fig_floor.update_xaxes(visible=False, range=[-0.5, 13.2])
-        fig_floor.update_yaxes(visible=False, range=[-0.3, 11.0],
+        fig_floor.update_xaxes(visible=False, range=[-0.5, 13.6])
+        fig_floor.update_yaxes(visible=False, range=[0.8, 11.0],
                                scaleanchor="x", scaleratio=1)
         fig_floor.update_layout(
             height=620,
@@ -702,9 +694,7 @@ with bottom_left:
     game_dist = query("""
         SELECT 'Slots' AS game, AVG(pct_slots) AS pct FROM mv_player_features
         UNION ALL SELECT 'Baccarat', AVG(pct_baccarat) FROM mv_player_features
-        UNION ALL SELECT 'Roulette', AVG(pct_roulette) FROM mv_player_features
         UNION ALL SELECT 'Blackjack', AVG(pct_blackjack) FROM mv_player_features
-        UNION ALL SELECT 'Poker', AVG(pct_poker) FROM mv_player_features
     """)
     if not game_dist.empty:
         fig3 = px.pie(game_dist, values="pct", names="game", title="Game Type Distribution")
