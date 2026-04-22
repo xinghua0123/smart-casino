@@ -544,7 +544,7 @@ if not floor_df.empty:
             axis=1,
         )
 
-        MARKER_SIZE = 18  # Fixed pixel size for every tile. Do not derive from data.
+        MARKER_SIZE = 30  # Fixed pixel size for every tile. Do not derive from data.
 
         fig_floor = go.Figure()
         for game in ["slots", "baccarat", "blackjack"]:
@@ -569,7 +569,7 @@ if not floor_df.empty:
                     ),
                     text=rows["table_id"],                         # machine label above tile
                     textposition="top center",
-                    textfont=dict(size=9, color="#e5e7eb"),
+                    textfont=dict(size=13, color="#e5e7eb"),
                     name=f"{action}, {game}",
                     legendgroup=action,
                     hovertemplate=(
@@ -602,8 +602,8 @@ if not floor_df.empty:
         def _pit_label(x, y, text):
             fig_floor.add_annotation(
                 x=x, y=y, text=f"<b>{text}</b>", showarrow=False,
-                font=dict(size=13, color="#ffffff", family="Helvetica"),
-                bgcolor="rgba(15,17,23,0.75)", borderpad=4,
+                font=dict(size=18, color="#ffffff", family="Helvetica"),
+                bgcolor="rgba(15,17,23,0.75)", borderpad=6,
                 xanchor="center", yanchor="middle",
             )
 
@@ -622,16 +622,16 @@ if not floor_df.empty:
         fig_floor.update_yaxes(visible=False, range=[0.8, 11.0],
                                scaleanchor="x", scaleratio=1)
         fig_floor.update_layout(
-            height=620,
-            margin=dict(t=50, b=150, l=10, r=10),   # extra bottom room for legend
+            height=760,
+            margin=dict(t=50, b=160, l=10, r=10),   # extra bottom room for legend
             plot_bgcolor="#0e1117",
             paper_bgcolor="#0e1117",
             legend=dict(
                 orientation="h",
-                yanchor="top", y=-0.22,             # legend well below plot edge
+                yanchor="top", y=-0.18,             # legend well below plot edge
                 xanchor="center", x=0.5,
                 bgcolor="rgba(0,0,0,0)",
-                font=dict(size=10, color="#e5e7eb"),
+                font=dict(size=12, color="#e5e7eb"),
                 itemsizing="constant",              # legend icons also uniform
             ),
         )
