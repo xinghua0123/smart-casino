@@ -23,12 +23,13 @@ These are the two most important metrics in casino marketing, now first-class fe
 
 **House Advantage (house edge)** — the statistical percentage the casino wins from each bet, per game type:
 
-| Game      | House Edge |
-|-----------|-----------:|
-| Slots     |      7.50% |
-| Roulette  |      5.26% |
-| Blackjack |      0.75% |
-| Poker     |      2.50% |
+| Game      | House Edge | Notes |
+|-----------|-----------:|-------|
+| Slots     |      7.50% | Highest edge, smallest average bet — casual volume leader |
+| Baccarat  |      1.15% | **The Macau hero: ~88% of Macau GGR.** Tiny edge × enormous volume = biggest theo contributor |
+| Roulette  |      5.26% | Minor on Asian floors |
+| Blackjack |      0.75% | Secondary pit game |
+| Poker     |      2.50% | Rake-equivalent vs. house; minor share |
 
 **Theoretical Win** — the casino's *expected* profit from a player's wagering, independent of short-term luck:
 
@@ -56,7 +57,7 @@ Computed inline in `mv_player_session_features` per bet, then aggregated:
 
 | Component | Description |
 |-----------|-------------|
-| **data_producer** | Generates realistic event streams across 4 archetypes: `casual` (50%, low bets, mostly slots), `regular` (30%, mixed games), `high_roller` (12%, high bets, table games), `emerging` (8%, gradually escalating bets — the key lookalike target). |
+| **data_producer** | Generates realistic Macau-style event streams across 4 archetypes: `casual` (50%, mostly slots + light baccarat), `regular` (30%, baccarat-heavy), `high_roller` (12%, **baccarat VIP + blackjack** — the Asian core), `emerging` (8%, testing baccarat VIP). |
 | **risingwave_sql** | 4 SQL files: Kafka sources, feature MVs (TUMBLE windows + theo-win), high-roller similarity scoring (now weighted 20% on cumulative theo), recommendation delivery with business rules, and a deduplicated `mv_high_roller_radar` for unique candidate ranking. |
 | **ml_service** | Trains 4 scikit-learn models on synthetic data, then runs an inference loop querying RisingWave every 10s and writing predictions back via SQL INSERT. |
 | **dashboard** | Streamlit app with live KPIs (incl. Theo Win window + Effective House Edge), High Roller Radar scatter plot, Theo-by-Tier chart, recommendation table, and a sidebar **LLM chat agent** with pluggable provider support plus persisted session memory. |
@@ -83,7 +84,7 @@ Computed inline in `mv_player_session_features` per bet, then aggregated:
 | `mv_high_roller_radar`          | Non-VIP players with HR similarity > 0.4, keeping only the latest row per `player_id` for unique candidate ranking |
 | `mv_theo_by_tier`               | Per-tier aggregation: total theo, avg theo, avg effective edge |
 | `mv_dashboard_stats`            | Top-line rollup for dashboard KPIs |
-| `tables_dim`                    | Static dimension table (32 physical tables) — `table_id`, `game_type`, `(x, y)`, `limit_min`, `limit_max` |
+| `tables_dim`                    | Static dimension table (36 physical tables, Macau-style — 16 slots, 8 baccarat standard + 2 VIP, 4 blackjack + 2 high-limit, 2 roulette, 2 poker) — `table_id`, `game_type`, `(x, y)`, `limit_min`, `limit_max` |
 | `mv_table_activity`             | Per-table 5-min TUMBLE: active_players, bets, avg_bet, theo_win_window, max_bet |
 | `mv_table_latest`               | Latest window per table (deduplicated "right now" view) |
 | `mv_table_recommendations`      | Floor-plan view: LEFT JOIN of `tables_dim` with latest activity, plus a business-rule `action_type` (RAISE_LIMIT / LOWER_LIMIT / HOT / COLD / HOLD) and suggested new limit range |

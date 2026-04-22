@@ -22,25 +22,30 @@ NUM_SAMPLES = 10000
 
 FEATURE_COLS = [
     "avg_bet", "win_rate",
-    "pct_slots", "pct_roulette", "pct_blackjack", "pct_poker",
+    "pct_slots", "pct_baccarat", "pct_roulette", "pct_blackjack", "pct_poker",
     "fnb_spend", "hotel_spend",
     "category_diversity", "spend_per_minute",
     "high_roller_similarity",
 ]
 
-GAME_TYPES = ["slots", "roulette", "blackjack", "poker"]
+# Order matches the dirichlet draws below.
+GAME_TYPES = ["slots", "baccarat", "roulette", "blackjack", "poker"]
 OFFER_TYPES = ["free_play", "fnb_voucher", "hotel_upgrade", "cashback"]
 
 
 def generate_synthetic_data(n: int) -> pd.DataFrame:
     """Generate synthetic player feature snapshots with labels."""
+    # 5-way dirichlet over game mix so that pct_* columns sum to 1. The prior
+    # is biased toward baccarat + slots to match the Macau-style floor.
+    game_mix = np.random.dirichlet(np.array([2.5, 3.5, 0.6, 1.2, 0.6]), n)
     data = {
         "avg_bet": np.random.lognormal(3.5, 1.2, n).clip(1, 5000),
         "win_rate": np.random.beta(4, 6, n),
-        "pct_slots": np.random.dirichlet(np.ones(4), n)[:, 0],
-        "pct_roulette": np.random.dirichlet(np.ones(4), n)[:, 1],
-        "pct_blackjack": np.random.dirichlet(np.ones(4), n)[:, 2],
-        "pct_poker": np.random.dirichlet(np.ones(4), n)[:, 3],
+        "pct_slots":     game_mix[:, 0],
+        "pct_baccarat":  game_mix[:, 1],
+        "pct_roulette":  game_mix[:, 2],
+        "pct_blackjack": game_mix[:, 3],
+        "pct_poker":     game_mix[:, 4],
         "fnb_spend": np.random.exponential(30, n).clip(0, 500),
         "hotel_spend": np.random.exponential(50, n).clip(0, 1000),
         "category_diversity": np.random.choice([1, 2, 3], n, p=[0.4, 0.35, 0.25]),
@@ -51,9 +56,9 @@ def generate_synthetic_data(n: int) -> pd.DataFrame:
 
     # --- Labels ---
 
-    # Next-best-game: influenced by current game preferences (recommend what they don't play yet)
-    game_prefs = df[["pct_slots", "pct_roulette", "pct_blackjack", "pct_poker"]].values
-    # Recommend the game they play 2nd most (cross-sell logic)
+    # Next-best-game: recommend the player's 2nd-most-played game (cross-sell).
+    game_prefs = df[["pct_slots", "pct_baccarat", "pct_roulette",
+                     "pct_blackjack", "pct_poker"]].values
     next_game_idx = np.argsort(game_prefs, axis=1)[:, -2]
     df["next_best_game"] = [GAME_TYPES[i] for i in next_game_idx]
 

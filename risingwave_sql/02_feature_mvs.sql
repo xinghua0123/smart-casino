@@ -4,6 +4,7 @@
 --
 -- House advantage (a.k.a. house edge) by game type — industry standards:
 --   Slots:      7.50%   (class III video slots, blended)
+--   Baccarat:   1.15%   (blended banker/player/tie — the Macau hero game)
 --   Roulette:   5.26%   (double-zero American wheel)
 --   Blackjack:  0.75%   (basic-strategy, 6-deck, H17)
 --   Poker:      2.50%   (rake-equivalent vs. the house)
@@ -34,6 +35,7 @@ SELECT
     AVG(CASE WHEN won THEN 1.0 ELSE 0.0 END)   AS win_rate,
     -- Game type distribution
     AVG(CASE WHEN game_type = 'slots'     THEN 1.0 ELSE 0.0 END) AS pct_slots,
+    AVG(CASE WHEN game_type = 'baccarat'  THEN 1.0 ELSE 0.0 END) AS pct_baccarat,
     AVG(CASE WHEN game_type = 'roulette'  THEN 1.0 ELSE 0.0 END) AS pct_roulette,
     AVG(CASE WHEN game_type = 'blackjack' THEN 1.0 ELSE 0.0 END) AS pct_blackjack,
     AVG(CASE WHEN game_type = 'poker'     THEN 1.0 ELSE 0.0 END) AS pct_poker,
@@ -41,6 +43,7 @@ SELECT
     SUM(
         CASE game_type
             WHEN 'slots'     THEN bet_amount * 0.0750
+            WHEN 'baccarat'  THEN bet_amount * 0.0115
             WHEN 'roulette'  THEN bet_amount * 0.0526
             WHEN 'blackjack' THEN bet_amount * 0.0075
             WHEN 'poker'     THEN bet_amount * 0.0250
@@ -109,6 +112,7 @@ SELECT
     g.total_payout,
     g.win_rate,
     g.pct_slots,
+    g.pct_baccarat,
     g.pct_roulette,
     g.pct_blackjack,
     g.pct_poker,

@@ -23,7 +23,7 @@ INFERENCE_INTERVAL_S = 10
 
 FEATURE_COLS = [
     "avg_bet", "win_rate",
-    "pct_slots", "pct_roulette", "pct_blackjack", "pct_poker",
+    "pct_slots", "pct_baccarat", "pct_roulette", "pct_blackjack", "pct_poker",
     "fnb_spend", "hotel_spend",
     "category_diversity", "spend_per_minute",
     "high_roller_similarity",
@@ -55,6 +55,7 @@ def fetch_features(conn) -> pd.DataFrame:
         p.avg_bet,
         p.win_rate,
         p.pct_slots,
+        p.pct_baccarat,
         p.pct_roulette,
         p.pct_blackjack,
         p.pct_poker,
