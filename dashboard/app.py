@@ -530,7 +530,12 @@ if not floor_df.empty:
     floor_left, floor_right = st.columns([2, 1])
 
     with floor_left:
-        # Plotly scatter: tables positioned on the floor (x, y from tables_dim)
+        # Build the floor map with go.Figure directly (not px.scatter) so every
+        # trace has an explicit, identical marker.size=18. px.scatter with
+        # color=action_type × symbol=game_type silently splits into many traces
+        # where update_traces(marker=dict(size=...)) did not apply uniformly —
+        # producing the "some tiles big, some tiles small" artefact. Here we
+        # render one trace per (game, action) combination with hard-coded size.
         plot_df = floor_df.copy()
         plot_df["limit_label"] = plot_df.apply(
             lambda r: f"${int(r['limit_min'])}-${int(r['limit_max'])}", axis=1
@@ -540,94 +545,97 @@ if not floor_df.empty:
             axis=1,
         )
 
-        fig_floor = px.scatter(
-            plot_df,
-            x="table_x", y="table_y",
-            color="action_type",
-            symbol="game_type",
-            text="table_id",
-            color_discrete_map=ACTION_COLORS,
-            symbol_map=GAME_SYMBOLS,
-            category_orders={
-                "action_type": ["RAISE_LIMIT", "LOWER_LIMIT", "HOT", "COLD", "HOLD"],
-            },
-            hover_data={
-                "table_id": True,
-                "game_type": True,
-                "active_players": True,
-                "bets": True,
-                "avg_bet": ":$,.0f",
-                "max_bet": ":$,.0f",
-                "theo_win_window": ":$,.0f",
-                "limit_label": True,
-                "suggested_label": True,
-                "action_type": True,
-                "table_x": False,
-                "table_y": False,
-                "limit_min": False,
-                "limit_max": False,
-                "suggested_limit_min": False,
-                "suggested_limit_max": False,
-                "total_bet": False,
-            },
-            labels={
-                "table_x": "",
-                "table_y": "",
-                "action_type": "Action",
-                "game_type": "Game",
-                "limit_label": "Current limit",
-                "suggested_label": "Suggested limit",
-                "avg_bet": "Avg bet",
-                "max_bet": "Max bet",
-                "theo_win_window": "Theo Win",
-                "active_players": "Active players",
-                "bets": "Bets",
-            },
+        MARKER_SIZE = 18  # Fixed pixel size for every tile. Do not derive from data.
+
+        fig_floor = go.Figure()
+        for game in ["slots", "blackjack", "roulette", "poker"]:
+            symbol = GAME_SYMBOLS[game]
+            game_rows = plot_df[plot_df["game_type"] == game]
+            if game_rows.empty:
+                continue
+            for action in ["RAISE_LIMIT", "LOWER_LIMIT", "HOT", "COLD", "HOLD"]:
+                rows = game_rows[game_rows["action_type"] == action]
+                if rows.empty:
+                    continue
+                fig_floor.add_trace(go.Scatter(
+                    x=rows["table_x"],
+                    y=rows["table_y"],
+                    mode="markers+text",
+                    marker=dict(
+                        size=MARKER_SIZE,
+                        symbol=symbol,
+                        color=ACTION_COLORS[action],
+                        line=dict(width=1, color="#111"),
+                        sizemode="diameter",
+                    ),
+                    text=rows["table_id"],                         # machine label above tile
+                    textposition="top center",
+                    textfont=dict(size=9, color="#e5e7eb"),
+                    name=f"{action}, {game}",
+                    legendgroup=action,
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>"
+                        "Game: %{customdata[1]}<br>"
+                        "Action: %{customdata[2]}<br>"
+                        "Active players: %{customdata[3]}<br>"
+                        "Bets: %{customdata[4]}<br>"
+                        "Avg bet: $%{customdata[5]:,.0f}<br>"
+                        "Max bet: $%{customdata[6]:,.0f}<br>"
+                        "Theo Win: $%{customdata[7]:,.0f}<br>"
+                        "Current limit: %{customdata[8]}<br>"
+                        "Suggested limit: %{customdata[9]}"
+                        "<extra></extra>"
+                    ),
+                    customdata=rows[[
+                        "table_id", "game_type", "action_type", "active_players",
+                        "bets", "avg_bet", "max_bet", "theo_win_window",
+                        "limit_label", "suggested_label",
+                    ]].values,
+                ))
+
+        fig_floor.update_layout(
             title="Live Floor Map — tables by position, color = recommended action",
         )
-        # Uniform marker size — explicitly iterate over traces because px.scatter
-        # with both color= and symbol= as categoricals creates one trace per
-        # (color × symbol) combo, and update_traces(marker=dict(size=...)) is
-        # unreliable at overriding all of them. All markers must be identical
-        # size regardless of game type / action type — the *action* is what we
-        # want the user to notice, not tile size.
-        for trace in fig_floor.data:
-            trace.marker.size = 18
-            trace.marker.line.width = 1
-            trace.marker.line.color = "#111"
-            trace.textposition = "bottom center"
-            trace.textfont = dict(size=9, color="#e5e7eb")
 
-        # Pit labels — positioned in gaps between clusters, white text, subtle
-        # background box so they don't compete with the tiles or disappear on
-        # the dark theme.
+        # Pit labels — white, clearly ABOVE each cluster so they never sit
+        # on top of tile shapes. Positions chosen to fit in the gaps between
+        # clusters given the tables_dim (x, y) grid.
         def _pit_label(x, y, text):
             fig_floor.add_annotation(
-                x=x, y=y, text=text, showarrow=False,
-                font=dict(size=12, color="#f3f4f6", family="Helvetica"),
-                bgcolor="rgba(15,17,23,0.7)", borderpad=3,
+                x=x, y=y, text=f"<b>{text}</b>", showarrow=False,
+                font=dict(size=13, color="#ffffff", family="Helvetica"),
+                bgcolor="rgba(15,17,23,0.75)", borderpad=4,
+                xanchor="center", yanchor="middle",
             )
 
-        _pit_label(2.4,  9.7, "SLOTS (penny)")
-        _pit_label(2.4,  2.5, "SLOTS (standard)")
+        # Penny slots cluster: tiles at y=7.8 & 8.8  → label above, clear of top row
+        _pit_label(2.4, 10.2, "SLOTS (penny)")
+        # Standard slots cluster: tiles at y=3.5 & 4.5 → label above (below bj pit x range)
+        _pit_label(2.4,  5.6, "SLOTS (standard)")
+        # Blackjack pit (standard): tiles at y=2.8, 3.9, 5.0 → label above top row
         _pit_label(6.4,  6.3, "BLACKJACK pit")
+        # High-limit BJ: tiles at y=7.5 → label above
         _pit_label(6.4,  8.5, "High-limit BJ")
-        _pit_label(7.6,  1.9, "ROULETTE")    # above the roulette row, not below
-        _pit_label(10.1, 2.5, "POKER lounge")
+        # Roulette row: tiles at y=0.8 → label above the diamonds, below bj
+        _pit_label(7.6,  1.9, "ROULETTE")
+        # Poker lounge: tiles at y=3.5 & 4.5 → label above, clear of bj_04
+        _pit_label(10.1, 5.6, "POKER lounge")
 
-        fig_floor.update_xaxes(visible=False, range=[-0.3, 11.6])
-        fig_floor.update_yaxes(visible=False, range=[-0.2, 10.2],
+        fig_floor.update_xaxes(visible=False, range=[-0.3, 11.8])
+        fig_floor.update_yaxes(visible=False, range=[-0.3, 11.0],
                                scaleanchor="x", scaleratio=1)
         fig_floor.update_layout(
-            height=560,
-            margin=dict(t=40, b=80, l=10, r=10),
+            height=620,
+            margin=dict(t=50, b=150, l=10, r=10),   # extra bottom room for legend
             plot_bgcolor="#0e1117",
+            paper_bgcolor="#0e1117",
             legend=dict(
                 orientation="h",
-                yanchor="top", y=-0.02,          # below the plot, never overlapping tiles
+                yanchor="top", y=-0.22,             # legend well below plot edge
                 xanchor="center", x=0.5,
                 bgcolor="rgba(0,0,0,0)",
-                font=dict(size=10),
+                font=dict(size=10, color="#e5e7eb"),
+                itemsizing="constant",              # legend icons also uniform
             ),
         )
         st.plotly_chart(fig_floor, use_container_width=True)
