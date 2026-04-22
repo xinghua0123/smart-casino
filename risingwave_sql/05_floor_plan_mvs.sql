@@ -27,45 +27,45 @@ CREATE TABLE tables_dim (
     limit_max   DOUBLE PRECISION
 );
 
--- Penny slots row (low limits, near entrance) — 8 machines
+-- Penny slots cluster (low limits, near entrance) — 4x2 grid, 1.2 unit spacing
 INSERT INTO tables_dim VALUES
-    ('slots_01', 'slots',  0.40, 6.30,  1.0,  10.0),
-    ('slots_02', 'slots',  0.95, 6.30,  1.0,  10.0),
-    ('slots_03', 'slots',  1.50, 6.30,  1.0,  10.0),
-    ('slots_04', 'slots',  2.05, 6.30,  1.0,  10.0),
-    ('slots_05', 'slots',  0.40, 7.00,  1.0,  10.0),
-    ('slots_06', 'slots',  0.95, 7.00,  1.0,  10.0),
-    ('slots_07', 'slots',  1.50, 7.00,  1.0,  10.0),
-    ('slots_08', 'slots',  2.05, 7.00,  1.0,  10.0),
--- Standard slots row (mid limits) — 8 machines
-    ('slots_09', 'slots',  0.40, 2.80,  5.0,  25.0),
-    ('slots_10', 'slots',  0.95, 2.80,  5.0,  25.0),
-    ('slots_11', 'slots',  1.50, 2.80,  5.0,  25.0),
-    ('slots_12', 'slots',  2.05, 2.80,  5.0,  25.0),
-    ('slots_13', 'slots',  0.40, 3.50,  5.0,  25.0),
-    ('slots_14', 'slots',  0.95, 3.50,  5.0,  25.0),
-    ('slots_15', 'slots',  1.50, 3.50,  5.0,  25.0),
-    ('slots_16', 'slots',  2.05, 3.50,  5.0,  25.0),
--- Standard blackjack pit — 6 tables
-    ('bj_01',    'blackjack', 4.10, 2.50,  25.0, 500.0),
-    ('bj_02',    'blackjack', 4.80, 2.50,  25.0, 500.0),
-    ('bj_03',    'blackjack', 4.10, 3.40,  25.0, 500.0),
-    ('bj_04',    'blackjack', 4.80, 3.40,  25.0, 500.0),
-    ('bj_05',    'blackjack', 4.10, 4.30,  25.0, 500.0),
-    ('bj_06',    'blackjack', 4.80, 4.30,  25.0, 500.0),
--- High-limit blackjack — 2 tables
-    ('bj_07',    'blackjack', 5.70, 6.00, 500.0, 2000.0),
-    ('bj_08',    'blackjack', 5.70, 6.90, 500.0, 2000.0),
--- Roulette (entrance-side, mid limits) — 4 wheels
-    ('rou_01',   'roulette',  4.10, 0.80, 10.0, 200.0),
-    ('rou_02',   'roulette',  4.65, 0.80, 10.0, 200.0),
-    ('rou_03',   'roulette',  5.20, 0.80, 10.0, 200.0),
-    ('rou_04',   'roulette',  5.75, 0.80, 10.0, 200.0),
--- Poker lounge (back, high stakes) — 4 tables
-    ('pok_01',   'poker',     7.30, 3.30, 50.0, 1000.0),
-    ('pok_02',   'poker',     8.20, 3.30, 50.0, 1000.0),
-    ('pok_03',   'poker',     7.30, 4.30, 50.0, 1000.0),
-    ('pok_04',   'poker',     8.20, 4.30, 50.0, 1000.0);
+    ('slots_01', 'slots',  0.60, 7.80,  1.0,  10.0),
+    ('slots_02', 'slots',  1.80, 7.80,  1.0,  10.0),
+    ('slots_03', 'slots',  3.00, 7.80,  1.0,  10.0),
+    ('slots_04', 'slots',  4.20, 7.80,  1.0,  10.0),
+    ('slots_05', 'slots',  0.60, 8.80,  1.0,  10.0),
+    ('slots_06', 'slots',  1.80, 8.80,  1.0,  10.0),
+    ('slots_07', 'slots',  3.00, 8.80,  1.0,  10.0),
+    ('slots_08', 'slots',  4.20, 8.80,  1.0,  10.0),
+-- Standard slots cluster — 4x2 grid
+    ('slots_09', 'slots',  0.60, 3.50,  5.0,  25.0),
+    ('slots_10', 'slots',  1.80, 3.50,  5.0,  25.0),
+    ('slots_11', 'slots',  3.00, 3.50,  5.0,  25.0),
+    ('slots_12', 'slots',  4.20, 3.50,  5.0,  25.0),
+    ('slots_13', 'slots',  0.60, 4.50,  5.0,  25.0),
+    ('slots_14', 'slots',  1.80, 4.50,  5.0,  25.0),
+    ('slots_15', 'slots',  3.00, 4.50,  5.0,  25.0),
+    ('slots_16', 'slots',  4.20, 4.50,  5.0,  25.0),
+-- Standard blackjack pit — 2x3 grid
+    ('bj_01',    'blackjack', 5.80, 2.80,  25.0, 500.0),
+    ('bj_02',    'blackjack', 7.00, 2.80,  25.0, 500.0),
+    ('bj_03',    'blackjack', 5.80, 3.90,  25.0, 500.0),
+    ('bj_04',    'blackjack', 7.00, 3.90,  25.0, 500.0),
+    ('bj_05',    'blackjack', 5.80, 5.00,  25.0, 500.0),
+    ('bj_06',    'blackjack', 7.00, 5.00,  25.0, 500.0),
+-- High-limit blackjack — 2 tables side by side
+    ('bj_07',    'blackjack', 5.80, 7.50, 500.0, 2000.0),
+    ('bj_08',    'blackjack', 7.00, 7.50, 500.0, 2000.0),
+-- Roulette (entrance row, mid limits) — 4 wheels in a row
+    ('rou_01',   'roulette',  5.80, 0.80, 10.0, 200.0),
+    ('rou_02',   'roulette',  7.00, 0.80, 10.0, 200.0),
+    ('rou_03',   'roulette',  8.20, 0.80, 10.0, 200.0),
+    ('rou_04',   'roulette',  9.40, 0.80, 10.0, 200.0),
+-- Poker lounge (back, high stakes) — 2x2 grid
+    ('pok_01',   'poker',     9.50, 3.50, 50.0, 1000.0),
+    ('pok_02',   'poker',    10.70, 3.50, 50.0, 1000.0),
+    ('pok_03',   'poker',     9.50, 4.50, 50.0, 1000.0),
+    ('pok_04',   'poker',    10.70, 4.50, 50.0, 1000.0);
 
 
 -- 5-min tumbling per-table activity

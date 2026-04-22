@@ -585,28 +585,28 @@ if not floor_df.empty:
             },
             title="Live Floor Map — tables by position, color = recommended action",
         )
-        # Uniform marker size — a bigger size scales with active_players via opacity
-        # instead of area, so tables never visually overlap on the floor map.
+        # Uniform marker size — small enough to never overlap given the 1.0+ unit
+        # grid spacing in tables_dim.
         fig_floor.update_traces(
-            marker=dict(size=22, line=dict(width=1, color="#111")),
+            marker=dict(size=18, line=dict(width=1, color="#111")),
             textposition="bottom center",
             textfont=dict(size=9, color="#bdc3c7"),
         )
-        # Background zones for pit labels
-        fig_floor.add_annotation(x=1.2, y=7.9, text="SLOTS (penny)", showarrow=False,
-                                 font=dict(size=10, color="#95a5a6"))
-        fig_floor.add_annotation(x=1.2, y=4.3, text="SLOTS (standard)", showarrow=False,
-                                 font=dict(size=10, color="#95a5a6"))
-        fig_floor.add_annotation(x=4.45, y=5.1, text="BLACKJACK pit", showarrow=False,
-                                 font=dict(size=10, color="#95a5a6"))
-        fig_floor.add_annotation(x=5.7, y=7.7, text="High-limit BJ", showarrow=False,
-                                 font=dict(size=10, color="#95a5a6"))
-        fig_floor.add_annotation(x=4.9, y=0.2, text="ROULETTE", showarrow=False,
-                                 font=dict(size=10, color="#95a5a6"))
-        fig_floor.add_annotation(x=7.8, y=5.1, text="POKER lounge", showarrow=False,
-                                 font=dict(size=10, color="#95a5a6"))
-        fig_floor.update_xaxes(visible=False, range=[-0.3, 9.5])
-        fig_floor.update_yaxes(visible=False, range=[0, 8.3], scaleanchor="x", scaleratio=1)
+        # Background zones for pit labels (positioned between clusters)
+        fig_floor.add_annotation(x=2.4, y=9.7, text="SLOTS (penny)", showarrow=False,
+                                 font=dict(size=11, color="#95a5a6"))
+        fig_floor.add_annotation(x=2.4, y=2.7, text="SLOTS (standard)", showarrow=False,
+                                 font=dict(size=11, color="#95a5a6"))
+        fig_floor.add_annotation(x=6.4, y=5.9, text="BLACKJACK pit", showarrow=False,
+                                 font=dict(size=11, color="#95a5a6"))
+        fig_floor.add_annotation(x=6.4, y=8.5, text="High-limit BJ", showarrow=False,
+                                 font=dict(size=11, color="#95a5a6"))
+        fig_floor.add_annotation(x=7.6, y=0.0, text="ROULETTE", showarrow=False,
+                                 font=dict(size=11, color="#95a5a6"))
+        fig_floor.add_annotation(x=10.1, y=2.7, text="POKER lounge", showarrow=False,
+                                 font=dict(size=11, color="#95a5a6"))
+        fig_floor.update_xaxes(visible=False, range=[-0.2, 11.5])
+        fig_floor.update_yaxes(visible=False, range=[-0.3, 10.0], scaleanchor="x", scaleratio=1)
         fig_floor.update_layout(
             height=520, margin=dict(t=40, b=10, l=10, r=10),
             plot_bgcolor="#0e1117",

@@ -71,33 +71,33 @@ GAME_TYPES = ["slots", "roulette", "blackjack", "poker"]
 #   Grid is roughly 10 wide x 8 tall. Slots cluster at the left (high foot traffic
 #   area near entrance), table games in the middle, and poker lounge on the right.
 TABLE_LAYOUT: list[tuple[str, str, float, float, float, float]] = (
-    # Penny slots row (low limits, near entrance) — 8 machines
+    # Penny slots cluster (low limits, near entrance) — 4x2 grid
     [(f"slots_{i:02d}", "slots",
-      0.4 + ((i - 1) % 4) * 0.55,
-      6.3 + ((i - 1) // 4) * 0.7,
+      0.6 + ((i - 1) % 4) * 1.2,
+      7.8 + ((i - 1) // 4) * 1.0,
       1.0, 10.0) for i in range(1, 9)]
-    # Standard slots row (mid limits) — 8 machines
+    # Standard slots cluster (mid limits) — 4x2 grid
     + [(f"slots_{i:02d}", "slots",
-        0.4 + ((i - 9) % 4) * 0.55,
-        2.8 + ((i - 9) // 4) * 0.7,
+        0.6 + ((i - 9) % 4) * 1.2,
+        3.5 + ((i - 9) // 4) * 1.0,
         5.0, 25.0) for i in range(9, 17)]
-    # Standard blackjack pit — 6 tables
+    # Standard blackjack pit — 2x3 grid
     + [(f"bj_{i:02d}", "blackjack",
-        4.1 + ((i - 1) % 2) * 0.7,
-        2.5 + ((i - 1) // 2) * 0.9,
+        5.8 + ((i - 1) % 2) * 1.2,
+        2.8 + ((i - 1) // 2) * 1.1,
         25.0, 500.0) for i in range(1, 7)]
-    # High-limit blackjack tables — 2 tables
-    + [("bj_07", "blackjack", 5.7, 6.0, 500.0, 2000.0),
-       ("bj_08", "blackjack", 5.7, 6.9, 500.0, 2000.0)]
-    # Roulette (entrance-side, mid limits) — 4 wheels
+    # High-limit blackjack tables — 2 tables (side by side)
+    + [("bj_07", "blackjack", 5.8, 7.5, 500.0, 2000.0),
+       ("bj_08", "blackjack", 7.0, 7.5, 500.0, 2000.0)]
+    # Roulette (entrance row, mid limits) — 4 wheels in a row
     + [(f"rou_{i:02d}", "roulette",
-        4.1 + (i - 1) * 0.55,
+        5.8 + (i - 1) * 1.2,
         0.8,
         10.0, 200.0) for i in range(1, 5)]
-    # Poker lounge (back, high stakes) — 4 tables
+    # Poker lounge (back, high stakes) — 2x2 grid
     + [(f"pok_{i:02d}", "poker",
-        7.3 + ((i - 1) % 2) * 0.9,
-        3.3 + ((i - 1) // 2) * 1.0,
+        9.5 + ((i - 1) % 2) * 1.2,
+        3.5 + ((i - 1) // 2) * 1.0,
         50.0, 1000.0) for i in range(1, 5)]
 )
 
