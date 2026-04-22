@@ -9,6 +9,12 @@ CREATE SOURCE gaming_events_src (
     tier            VARCHAR,
     archetype       VARCHAR,
     game_type       VARCHAR,
+    -- Physical-floor fields (for Floor Plan view)
+    table_id        VARCHAR,
+    table_x         DOUBLE PRECISION,
+    table_y         DOUBLE PRECISION,
+    limit_min       DOUBLE PRECISION,
+    limit_max       DOUBLE PRECISION,
     bet_amount      DOUBLE PRECISION,
     payout          DOUBLE PRECISION,
     won             BOOLEAN,

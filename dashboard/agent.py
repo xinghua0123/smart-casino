@@ -52,6 +52,22 @@ Columns: tier, players (INT), total_theo_win (FLOAT), avg_theo_per_player (FLOAT
 Aggregated dashboard KPIs (single row).
 Columns: active_players (INT), avg_bet_all (FLOAT), avg_spend_per_min (FLOAT), total_wagered (FLOAT), theo_win_window (FLOAT), avg_house_edge (FLOAT 0-1)
 
+### tables_dim
+Static dimension table: one row per physical table on the casino floor.
+Columns: table_id (VARCHAR PK), game_type (VARCHAR: slots/blackjack/roulette/poker), table_x (FLOAT — floor plan x), table_y (FLOAT — floor plan y), limit_min (FLOAT — current min bet), limit_max (FLOAT — current max bet)
+
+### mv_table_activity
+Per-table per-5-min-window rollup of live floor activity.
+Columns: table_id, window_start, window_end, game_type, table_x, table_y, limit_min, limit_max, active_players (INT), bets (INT), avg_bet (FLOAT), total_bet (FLOAT), max_bet (FLOAT), min_bet (FLOAT), theo_win_window (FLOAT)
+
+### mv_table_latest
+Latest window's activity per table (subset of mv_table_activity). Use this for "right now" per-table questions.
+Columns: same as mv_table_activity.
+
+### mv_table_recommendations
+Floor Plan view: LEFT JOIN of tables_dim with mv_table_latest, plus a business-rule layer. Cold tables (no activity in the latest window) still appear with zeros. One row per physical table.
+Columns: table_id, game_type, table_x, table_y, limit_min, limit_max, active_players, bets, avg_bet, max_bet, total_bet, theo_win_window, window_start, action_type (VARCHAR: RAISE_LIMIT/LOWER_LIMIT/HOT/COLD/HOLD), suggested_limit_min (FLOAT), suggested_limit_max (FLOAT)
+
 ## Business Context
 - **Archetypes:** casual (50% of players, low bets, mostly slots), regular (30%, mixed games), high_roller (12%, high bets, table games), emerging (8%, gradually increasing bets — the key group to watch)
 - **Action types:** URGENT_RETENTION = churn > 45% + silver+ tier; VIP_UPGRADE_CANDIDATE = ML predicts high-roller trajectory; RETENTION_OFFER = churn > 38%; STANDARD_RECOMMENDATION = healthy player
@@ -60,6 +76,7 @@ Columns: active_players (INT), avg_bet_all (FLOAT), avg_spend_per_min (FLOAT), t
 - **Effective house edge** = cumulative_theo_win ÷ cumulative_wagered. A player who plays more blackjack has a lower effective edge (less profitable per dollar wagered) than one who plays mostly slots, even at the same wager volume.
 - **Offer value (reinvestment)** scales with cumulative_theo_win: 40% for URGENT_RETENTION, 35% for VIP_UPGRADE_CANDIDATE, 25% for RETENTION_OFFER, 15% for STANDARD_RECOMMENDATION.
 - **High roller similarity** weights: bet size 20%, blackjack pref 12%, poker pref 12%, F&B spend 8%, hotel spend 8%, category diversity 8%, spend velocity 12%, cumulative_theo_win 20%
+- **Floor plan:** 32 tables in fixed positions on a 10×8 grid. Slots cluster on the left (8 penny + 8 standard), blackjack pit in the middle (6 standard + 2 high-limit), roulette at the entrance, poker lounge on the right. Each table has (limit_min, limit_max). `mv_table_recommendations.action_type` = RAISE_LIMIT (packed + betting near ceiling), LOWER_LIMIT (cold + min above entry-level), HOT, COLD, or HOLD.
 
 ## Rules
 1. ONLY generate SELECT queries. Never generate INSERT, UPDATE, DELETE, DROP, or any DDL.

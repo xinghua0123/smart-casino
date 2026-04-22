@@ -10,6 +10,7 @@ A reference demo showing **RisingWave** as a streaming feature store for persona
 
 ## Recent Changes
 
+- **Casino Floor Plan view:** new live 2D map of the physical gaming floor. Each of 32 tables has a fixed `(x, y)` position and a bet-limit range; gaming events are tagged with `table_id`, `limit_min`, and `limit_max`. A new MV `mv_table_recommendations` applies foot-traffic + bet-segmentation rules to flag each table as **RAISE_LIMIT** (packed, avg bet ≥ 70% of ceiling), **LOWER_LIMIT** (cold + min above entry-level), **HOT**, **COLD**, or **HOLD**, and suggests a new limit range. Rendered in the dashboard as a plotly scatter colored by action, plus a "Needs attention now" table of the tables to change.
 - **Stateful chat memory:** the sidebar LLM agent now keeps conversation context across reruns and follow-up questions within the same chat session.
 - **SQL-backed chat persistence:** chat history is stored in a `chat_messages` table. By default this uses RisingWave, but the storage layer is abstracted so it can be switched to Postgres later without changing the app call sites.
 - **Clear-on-delete behavior:** pressing **Clear Chat** deletes the persisted rows for that chat session, resets Streamlit `session_state`, and starts a fresh session.
@@ -82,6 +83,10 @@ Computed inline in `mv_player_session_features` per bet, then aggregated:
 | `mv_high_roller_radar`          | Non-VIP players with HR similarity > 0.4, keeping only the latest row per `player_id` for unique candidate ranking |
 | `mv_theo_by_tier`               | Per-tier aggregation: total theo, avg theo, avg effective edge |
 | `mv_dashboard_stats`            | Top-line rollup for dashboard KPIs |
+| `tables_dim`                    | Static dimension table (32 physical tables) — `table_id`, `game_type`, `(x, y)`, `limit_min`, `limit_max` |
+| `mv_table_activity`             | Per-table 5-min TUMBLE: active_players, bets, avg_bet, theo_win_window, max_bet |
+| `mv_table_latest`               | Latest window per table (deduplicated "right now" view) |
+| `mv_table_recommendations`      | Floor-plan view: LEFT JOIN of `tables_dim` with latest activity, plus a business-rule `action_type` (RAISE_LIMIT / LOWER_LIMIT / HOT / COLD / HOLD) and suggested new limit range |
 
 ## LLM Chat Agent
 

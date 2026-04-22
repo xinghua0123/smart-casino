@@ -60,6 +60,72 @@ ARCHETYPES = {
 }
 
 GAME_TYPES = ["slots", "roulette", "blackjack", "poker"]
+
+# --- Physical casino floor layout ------------------------------------------------
+# Each table has a fixed (x, y) position on the floor, a game_type, and a live
+# betting-limit range. The floor-plan view on the dashboard uses (x, y) verbatim
+# for rendering, and the per-table MVs use limit_min/limit_max to decide whether
+# the limit should be raised (packed + betting near ceiling) or lowered
+# (cold + few players). Keep this in sync with `tables_dim` seed in 05_floor_plan_mvs.sql.
+#
+#   Grid is roughly 10 wide x 8 tall. Slots cluster at the left (high foot traffic
+#   area near entrance), table games in the middle, and poker lounge on the right.
+TABLE_LAYOUT: list[tuple[str, str, float, float, float, float]] = (
+    # Penny slots row (low limits, near entrance) — 8 machines
+    [(f"slots_{i:02d}", "slots",
+      0.4 + ((i - 1) % 4) * 0.55,
+      6.3 + ((i - 1) // 4) * 0.7,
+      1.0, 10.0) for i in range(1, 9)]
+    # Standard slots row (mid limits) — 8 machines
+    + [(f"slots_{i:02d}", "slots",
+        0.4 + ((i - 9) % 4) * 0.55,
+        2.8 + ((i - 9) // 4) * 0.7,
+        5.0, 25.0) for i in range(9, 17)]
+    # Standard blackjack pit — 6 tables
+    + [(f"bj_{i:02d}", "blackjack",
+        4.1 + ((i - 1) % 2) * 0.7,
+        2.5 + ((i - 1) // 2) * 0.9,
+        25.0, 500.0) for i in range(1, 7)]
+    # High-limit blackjack tables — 2 tables
+    + [("bj_07", "blackjack", 5.7, 6.0, 500.0, 2000.0),
+       ("bj_08", "blackjack", 5.7, 6.9, 500.0, 2000.0)]
+    # Roulette (entrance-side, mid limits) — 4 wheels
+    + [(f"rou_{i:02d}", "roulette",
+        4.1 + (i - 1) * 0.55,
+        0.8,
+        10.0, 200.0) for i in range(1, 5)]
+    # Poker lounge (back, high stakes) — 4 tables
+    + [(f"pok_{i:02d}", "poker",
+        7.3 + ((i - 1) % 2) * 0.9,
+        3.3 + ((i - 1) // 2) * 1.0,
+        50.0, 1000.0) for i in range(1, 5)]
+)
+
+# Group tables by game_type for fast lookup
+_TABLES_BY_GAME: dict[str, list[tuple[str, str, float, float, float, float]]] = {}
+for _t in TABLE_LAYOUT:
+    _TABLES_BY_GAME.setdefault(_t[1], []).append(_t)
+
+
+def pick_table(game_type: str, bet: float) -> tuple[str, str, float, float, float, float]:
+    """Pick a table for this bet. Prefer tables whose [limit_min, limit_max] contains
+    the bet; fall back to the nearest tier if none match."""
+    options = _TABLES_BY_GAME.get(game_type, [])
+    if not options:
+        return ("unknown", game_type, 0.0, 0.0, 0.0, 0.0)
+    fits = [t for t in options if t[4] <= bet <= t[5]]
+    if fits:
+        return random.choice(fits)
+    # No tier matches — bet is below all mins or above all maxes; pick the closest tier.
+    max_allowed = max(t[5] for t in options)
+    if bet > max_allowed:
+        top_tables = [t for t in options if t[5] == max_allowed]
+        return random.choice(top_tables)
+    min_allowed = min(t[4] for t in options)
+    bottom_tables = [t for t in options if t[4] == min_allowed]
+    return random.choice(bottom_tables)
+
+
 FNB_ITEMS = [
     "cocktail", "beer", "wine", "steak_dinner", "burger",
     "sushi_platter", "dessert", "coffee", "champagne", "lobster",
@@ -115,6 +181,8 @@ def generate_gaming_event(player: Player) -> dict:
     game = pick_weighted(player.profile["games"])
     lo, hi = player.profile["avg_bet"]
     bet = round(random.uniform(lo, hi) * player.bet_escalation, 2)
+    # Pick a physical table on the floor — bet range must match the table limits.
+    table_id, _, table_x, table_y, limit_min, limit_max = pick_table(game, bet)
     # Win probability varies by game
     win_probs = {"slots": 0.35, "roulette": 0.45, "blackjack": 0.48, "poker": 0.42}
     won = random.random() < win_probs.get(game, 0.40)
@@ -131,6 +199,11 @@ def generate_gaming_event(player: Player) -> dict:
         "tier": player.tier,
         "archetype": player.archetype,
         "game_type": game,
+        "table_id": table_id,
+        "table_x": table_x,
+        "table_y": table_y,
+        "limit_min": limit_min,
+        "limit_max": limit_max,
         "bet_amount": bet,
         "payout": payout,
         "won": won,

@@ -364,10 +364,13 @@ with left:
 with right:
     st.markdown("""
 **Recommendation categories:**
-- **URGENT_RETENTION** — Churn risk > 45% AND Silver+ tier. Action: host call, escalated offer (2x avg bet).
-- **VIP_UPGRADE_CANDIDATE** — ML predicts high-roller trajectory. Action: VIP invite, comp upgrade (1.5x avg bet).
-- **RETENTION_OFFER** — Churn risk > 38%. Action: targeted offer matching preferred reward type (1x avg bet).
-- **STANDARD_RECOMMENDATION** — Healthy player. Action: cross-sell next-best-game suggestion (0.5x avg bet).
+
+Offer value = reinvestment % of the player's **cumulative Theo Win** (industry-standard comp sizing), with an `avg_bet` floor so new players still get a sensible offer.
+
+- **URGENT_RETENTION** — Churn risk > 45% AND Silver+ tier. Action: host call, aggressive save offer — **40% of cumulative theo**.
+- **VIP_UPGRADE_CANDIDATE** — ML predicts high-roller trajectory. Action: VIP invite, comp upgrade — **35% of cumulative theo**.
+- **RETENTION_OFFER** — Churn risk > 38%. Action: targeted offer matching preferred reward type — **25% of cumulative theo**.
+- **STANDARD_RECOMMENDATION** — Healthy player. Action: cross-sell next-best-game — **15% of cumulative theo** (baseline loyalty).
     """)
 
 # --- Data tables ---
@@ -481,6 +484,182 @@ with theo_right:
         "Reinvestment tiers (offer_value): **40%** of theo for urgent retention, **35%** for VIP upgrade, "
         "**25%** for standard retention, **15%** for baseline loyalty."
     )
+
+st.divider()
+
+# ================================================================
+# Casino Floor Plan — per-table live view + raise/lower-limit recommendations
+# ================================================================
+st.subheader("Casino Floor Plan")
+st.caption(
+    "Live map of the gaming floor. Each marker is one table; size = active players "
+    "this window; color = recommended action (raise / lower limit, hot, cold, hold). "
+    "Rules use foot traffic + bet segmentation — tune the thresholds to match the property."
+)
+
+floor_df = query("""
+    SELECT table_id, game_type, table_x, table_y,
+           limit_min, limit_max,
+           active_players, bets,
+           ROUND(avg_bet::numeric, 0)         AS avg_bet,
+           ROUND(max_bet::numeric, 0)         AS max_bet,
+           ROUND(total_bet::numeric, 0)       AS total_bet,
+           ROUND(theo_win_window::numeric, 0) AS theo_win_window,
+           action_type,
+           suggested_limit_min,
+           suggested_limit_max
+    FROM mv_table_recommendations
+""")
+
+ACTION_COLORS = {
+    "RAISE_LIMIT":  "#e74c3c",  # red — push the ceiling up
+    "LOWER_LIMIT":  "#3498db",  # blue — drop the floor to attract traffic
+    "HOT":          "#f39c12",  # orange — healthy, keep an eye on it
+    "COLD":         "#7f8c8d",  # grey — empty
+    "HOLD":         "#2ecc71",  # green — balanced, no change needed
+}
+GAME_SYMBOLS = {
+    "slots":     "square",
+    "blackjack": "circle",
+    "roulette":  "diamond",
+    "poker":     "hexagon",
+}
+
+if not floor_df.empty:
+    floor_left, floor_right = st.columns([2, 1])
+
+    with floor_left:
+        # Plotly scatter: tables positioned on the floor (x, y from tables_dim)
+        plot_df = floor_df.copy()
+        plot_df["marker_size"] = plot_df["active_players"].clip(lower=1) * 8 + 12
+        plot_df["limit_label"] = plot_df.apply(
+            lambda r: f"${int(r['limit_min'])}-${int(r['limit_max'])}", axis=1
+        )
+        plot_df["suggested_label"] = plot_df.apply(
+            lambda r: f"${int(r['suggested_limit_min'])}-${int(r['suggested_limit_max'])}",
+            axis=1,
+        )
+
+        fig_floor = px.scatter(
+            plot_df,
+            x="table_x", y="table_y",
+            color="action_type",
+            symbol="game_type",
+            size="marker_size",
+            size_max=40,
+            text="table_id",
+            color_discrete_map=ACTION_COLORS,
+            symbol_map=GAME_SYMBOLS,
+            category_orders={
+                "action_type": ["RAISE_LIMIT", "LOWER_LIMIT", "HOT", "COLD", "HOLD"],
+            },
+            hover_data={
+                "table_id": True,
+                "game_type": True,
+                "active_players": True,
+                "bets": True,
+                "avg_bet": ":$,.0f",
+                "max_bet": ":$,.0f",
+                "theo_win_window": ":$,.0f",
+                "limit_label": True,
+                "suggested_label": True,
+                "action_type": True,
+                "table_x": False,
+                "table_y": False,
+                "marker_size": False,
+                "limit_min": False,
+                "limit_max": False,
+                "suggested_limit_min": False,
+                "suggested_limit_max": False,
+                "total_bet": False,
+            },
+            labels={
+                "table_x": "",
+                "table_y": "",
+                "action_type": "Action",
+                "game_type": "Game",
+                "limit_label": "Current limit",
+                "suggested_label": "Suggested limit",
+                "avg_bet": "Avg bet",
+                "max_bet": "Max bet",
+                "theo_win_window": "Theo Win",
+                "active_players": "Active players",
+                "bets": "Bets",
+            },
+            title="Live Floor Map — tables by position, color = recommended action",
+        )
+        fig_floor.update_traces(
+            textposition="bottom center",
+            textfont=dict(size=9, color="#2c3e50"),
+        )
+        # Background zones for pit labels
+        fig_floor.add_annotation(x=1.2, y=7.9, text="SLOTS (penny)", showarrow=False,
+                                 font=dict(size=10, color="#95a5a6"))
+        fig_floor.add_annotation(x=1.2, y=4.3, text="SLOTS (standard)", showarrow=False,
+                                 font=dict(size=10, color="#95a5a6"))
+        fig_floor.add_annotation(x=4.45, y=5.1, text="BLACKJACK pit", showarrow=False,
+                                 font=dict(size=10, color="#95a5a6"))
+        fig_floor.add_annotation(x=5.7, y=7.7, text="High-limit BJ", showarrow=False,
+                                 font=dict(size=10, color="#95a5a6"))
+        fig_floor.add_annotation(x=4.9, y=0.2, text="ROULETTE", showarrow=False,
+                                 font=dict(size=10, color="#95a5a6"))
+        fig_floor.add_annotation(x=7.8, y=5.1, text="POKER lounge", showarrow=False,
+                                 font=dict(size=10, color="#95a5a6"))
+        fig_floor.update_xaxes(visible=False, range=[-0.3, 9.5])
+        fig_floor.update_yaxes(visible=False, range=[0, 8.3], scaleanchor="x", scaleratio=1)
+        fig_floor.update_layout(
+            height=520, margin=dict(t=40, b=10, l=10, r=10),
+            plot_bgcolor="#0e1117",
+            legend=dict(orientation="h", yanchor="bottom", y=-0.08, xanchor="center", x=0.5),
+        )
+        st.plotly_chart(fig_floor, use_container_width=True)
+
+    with floor_right:
+        st.markdown("**Action meanings**")
+        st.markdown(
+            "- 🔴 **RAISE_LIMIT** — packed (≥ 3 players) and avg bet is ≥ 70% of the "
+            "current ceiling. Push the max up to capture more theo.\n"
+            "- 🔵 **LOWER_LIMIT** — cold (≤ 1 player, fewer than 8 bets) and the min "
+            "is above entry-level. Drop it to pull in casual traffic.\n"
+            "- 🟠 **HOT** — healthy occupancy generating strong theo this window.\n"
+            "- ⚫ **COLD** — essentially no activity. Watch; no limit change yet.\n"
+            "- 🟢 **HOLD** — balanced. Leave it alone."
+        )
+        st.caption(
+            "Rules are a starting point. Casinos typically layer in weather, holidays, "
+            "player VIP mix, and nearby-table overflow — tune the thresholds in "
+            "`mv_table_recommendations` per property."
+        )
+
+        # Priority list of tables that need action
+        action_priority = {
+            "RAISE_LIMIT": 1, "LOWER_LIMIT": 2, "HOT": 3, "COLD": 4, "HOLD": 5,
+        }
+        priority_df = floor_df.copy()
+        priority_df["priority"] = priority_df["action_type"].map(action_priority)
+        priority_df = (
+            priority_df[priority_df["action_type"].isin(["RAISE_LIMIT", "LOWER_LIMIT"])]
+            .sort_values(["priority", "theo_win_window"], ascending=[True, False])
+        )
+        if not priority_df.empty:
+            st.markdown("**Needs attention now**")
+            show_cols = ["table_id", "game_type", "action_type", "active_players",
+                         "avg_bet", "limit_min", "limit_max",
+                         "suggested_limit_min", "suggested_limit_max"]
+            st.dataframe(
+                priority_df[show_cols].rename(columns={
+                    "table_id": "Table", "game_type": "Game",
+                    "action_type": "Action", "active_players": "Players",
+                    "avg_bet": "Avg Bet", "limit_min": "Min",
+                    "limit_max": "Max", "suggested_limit_min": "→ Min",
+                    "suggested_limit_max": "→ Max",
+                }),
+                hide_index=True, use_container_width=True, height=260,
+            )
+        else:
+            st.info("No tables currently flagged for a limit change — floor is balanced.")
+else:
+    st.info("Waiting for per-table data (first window finishes in ~5 min after restart)...")
 
 st.divider()
 
