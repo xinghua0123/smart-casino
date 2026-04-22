@@ -492,8 +492,9 @@ st.divider()
 # ================================================================
 st.subheader("Casino Floor Plan")
 st.caption(
-    "Live map of the gaming floor. Each marker is one table; size = active players "
-    "this window; color = recommended action (raise / lower limit, hot, cold, hold). "
+    "Live map of the gaming floor. Each marker is one table — shape = game type, "
+    "color = recommended action (raise / lower limit, hot, cold, hold). "
+    "Hover a table for live stats (active players, avg bet, theo win, suggested new limits). "
     "Rules use foot traffic + bet segmentation — tune the thresholds to match the property."
 )
 
@@ -531,7 +532,6 @@ if not floor_df.empty:
     with floor_left:
         # Plotly scatter: tables positioned on the floor (x, y from tables_dim)
         plot_df = floor_df.copy()
-        plot_df["marker_size"] = plot_df["active_players"].clip(lower=1) * 8 + 12
         plot_df["limit_label"] = plot_df.apply(
             lambda r: f"${int(r['limit_min'])}-${int(r['limit_max'])}", axis=1
         )
@@ -545,8 +545,6 @@ if not floor_df.empty:
             x="table_x", y="table_y",
             color="action_type",
             symbol="game_type",
-            size="marker_size",
-            size_max=40,
             text="table_id",
             color_discrete_map=ACTION_COLORS,
             symbol_map=GAME_SYMBOLS,
@@ -566,7 +564,6 @@ if not floor_df.empty:
                 "action_type": True,
                 "table_x": False,
                 "table_y": False,
-                "marker_size": False,
                 "limit_min": False,
                 "limit_max": False,
                 "suggested_limit_min": False,
@@ -588,9 +585,12 @@ if not floor_df.empty:
             },
             title="Live Floor Map — tables by position, color = recommended action",
         )
+        # Uniform marker size — a bigger size scales with active_players via opacity
+        # instead of area, so tables never visually overlap on the floor map.
         fig_floor.update_traces(
+            marker=dict(size=22, line=dict(width=1, color="#111")),
             textposition="bottom center",
-            textfont=dict(size=9, color="#2c3e50"),
+            textfont=dict(size=9, color="#bdc3c7"),
         )
         # Background zones for pit labels
         fig_floor.add_annotation(x=1.2, y=7.9, text="SLOTS (penny)", showarrow=False,
