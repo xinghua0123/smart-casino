@@ -13,6 +13,7 @@
 -- ============================================================
 
 DROP MATERIALIZED VIEW IF EXISTS mv_table_recommendations CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS mv_table_recommendation_signals CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS mv_pit_live_load CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS mv_table_live_load CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS mv_table_latest CASCADE;
@@ -165,6 +166,9 @@ LEFT JOIN mv_table_latest a
 CREATE MATERIALIZED VIEW mv_pit_live_load AS
 SELECT
     pit_group,
+    SUM(active_players) AS pit_active_players,
+    SUM(bets) AS pit_bets,
+    SUM(theo_win_window) AS pit_theo_win_window,
     SUM(active_players)::DOUBLE PRECISION / SUM(seat_capacity) AS pit_occupancy_rate,
     MIN(occupancy_rate) AS pit_min_occupancy_rate,
     MAX(occupancy_rate) AS pit_max_occupancy_rate
@@ -175,7 +179,7 @@ GROUP BY pit_group;
 -- Starting-minimum recommendations for baccarat and blackjack only. The
 -- 85%/35% pair detects a genuine within-pit imbalance, so changes redirect
 -- demand instead of moving every table's minimum in the same direction.
-CREATE MATERIALIZED VIEW mv_table_recommendations AS
+CREATE MATERIALIZED VIEW mv_table_recommendation_signals AS
 SELECT
     l.table_id,
     l.game_type,
@@ -193,6 +197,9 @@ SELECT
     l.theo_win_window,
     l.window_start,
     l.occupancy_rate,
+    p.pit_active_players,
+    p.pit_bets,
+    p.pit_theo_win_window,
     p.pit_occupancy_rate,
     p.pit_min_occupancy_rate,
     p.pit_max_occupancy_rate,
@@ -263,3 +270,98 @@ SELECT
 FROM mv_table_live_load l
 JOIN mv_pit_live_load p
     ON l.pit_group = p.pit_group;
+
+
+-- Conservative impact scenario for each minimum change. This is an estimate,
+-- not a guarantee: a raise releases roughly 20% of occupied seats, while a
+-- lower minimum captures half of the observed within-pit occupancy gap. Theo
+-- uses the table's recent per-seat rate (or the pit average for an empty table)
+-- and a capped change in wagering intensity after the limit adjustment.
+CREATE MATERIALIZED VIEW mv_table_recommendations AS
+SELECT
+    projection.*,
+    ROUND(
+        (projection.projected_theo_per_hour - projection.current_theo_per_hour)::NUMERIC,
+        0
+    ) AS estimated_theo_delta_per_hour,
+    CASE
+        WHEN projection.action_type NOT IN ('RAISE_MINIMUM', 'LOWER_MINIMUM') THEN 'N/A'
+        WHEN projection.bets >= 20 THEN 'HIGH'
+        WHEN projection.bets >= 8 THEN 'MEDIUM'
+        ELSE 'LOW'
+    END AS impact_confidence
+FROM (
+    SELECT
+        modeled.*,
+        ROUND((modeled.theo_win_window * 60.0)::NUMERIC, 0) AS current_theo_per_hour,
+        ROUND((
+            CASE
+                WHEN modeled.action_type = 'RAISE_MINIMUM' THEN
+                    GREATEST(
+                        0.0,
+                        modeled.theo_win_window
+                            + modeled.estimated_seat_delta * modeled.theo_per_seat_minute
+                    ) * 60.0 * (
+                        1.0 + LEAST(
+                            0.35,
+                            GREATEST(
+                                0.0,
+                                (modeled.suggested_limit_min / NULLIF(modeled.limit_min, 0.0) - 1.0) * 0.25
+                            )
+                        )
+                    )
+                WHEN modeled.action_type = 'LOWER_MINIMUM' THEN
+                    GREATEST(
+                        0.0,
+                        modeled.theo_win_window
+                            + modeled.estimated_seat_delta * modeled.theo_per_seat_minute
+                    ) * 60.0 * (
+                        1.0 - LEAST(
+                            0.20,
+                            GREATEST(
+                                0.0,
+                                (1.0 - modeled.suggested_limit_min / NULLIF(modeled.limit_min, 0.0)) * 0.15
+                            )
+                        )
+                    )
+                ELSE modeled.theo_win_window * 60.0
+            END
+        )::NUMERIC, 0) AS projected_theo_per_hour
+    FROM (
+        SELECT
+            signal.*,
+            LEAST(signal.active_players, signal.seat_capacity) AS current_seated_players,
+            CASE
+                WHEN signal.action_type = 'RAISE_MINIMUM' THEN
+                    -LEAST(
+                        LEAST(signal.active_players, signal.seat_capacity),
+                        GREATEST(
+                            1,
+                            CEIL(LEAST(signal.active_players, signal.seat_capacity) * 0.20)::INT
+                        )
+                    )
+                WHEN signal.action_type = 'LOWER_MINIMUM' THEN
+                    LEAST(
+                        signal.seat_capacity - LEAST(signal.active_players, signal.seat_capacity),
+                        GREATEST(
+                            1,
+                            CEIL(
+                                (signal.pit_max_occupancy_rate - signal.occupancy_rate)
+                                * signal.seat_capacity * 0.50
+                            )::INT
+                        )
+                    )
+                ELSE 0
+            END AS estimated_seat_delta,
+            CASE
+                WHEN LEAST(signal.active_players, signal.seat_capacity) > 0 THEN
+                    signal.theo_win_window
+                        / LEAST(signal.active_players, signal.seat_capacity)::DOUBLE PRECISION
+                WHEN signal.pit_active_players > 0 THEN
+                    signal.pit_theo_win_window
+                        / signal.pit_active_players::DOUBLE PRECISION
+                ELSE 0.0
+            END AS theo_per_seat_minute
+        FROM mv_table_recommendation_signals signal
+    ) modeled
+) projection;

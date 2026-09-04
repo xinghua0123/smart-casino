@@ -359,11 +359,11 @@ if not cur_df.empty and cur_df["active_players"].iloc[0] is not None and int(cur
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Active Players", int(cur["active_players"]))
     c2.metric("Avg Bet", f"${cur_bet:,.0f}",
-              delta=f"${d_bet:+,.0f} {lbl}" if abs(d_bet) >= 1 else None)
+              delta=f"{'-' if d_bet < 0 else '+'}${abs(d_bet):,.0f} {lbl}" if abs(d_bet) >= 1 else None)
     c3.metric("Total Wagered (window)", f"${cur_wagered:,.0f}",
-              delta=f"${d_wagered:+,.0f} {lbl}" if abs(d_wagered) >= 1 else None)
+              delta=f"{'-' if d_wagered < 0 else '+'}${abs(d_wagered):,.0f} {lbl}" if abs(d_wagered) >= 1 else None)
     c4.metric("Theo Win (window)", f"${cur_theo:,.0f}",
-              delta=f"${d_theo:+,.0f} {lbl}" if abs(d_theo) >= 1 else None,
+              delta=f"{'-' if d_theo < 0 else '+'}${abs(d_theo):,.0f} {lbl}" if abs(d_theo) >= 1 else None,
               help="Theoretical Win = Σ(bet × house_edge). Casino's expected profit from this window's play, independent of short-term luck.")
     c5.metric("Effective House Edge", f"{cur_edge:.2%}",
               delta=f"{d_edge:+.2%} {lbl}" if abs(d_edge) >= 0.0001 else None,
@@ -588,7 +588,12 @@ floor_df = query("""
            ROUND((pit_occupancy_rate * 100)::numeric, 0) AS pit_occupancy_pct,
            action_type,
            suggested_limit_min,
-           recommendation_reason
+           recommendation_reason,
+           estimated_seat_delta,
+           current_theo_per_hour,
+           projected_theo_per_hour,
+           estimated_theo_delta_per_hour,
+           impact_confidence
     FROM mv_table_recommendations
 """)
 
@@ -617,12 +622,23 @@ if not floor_df.empty:
     crowded_tables = int(floor_df["action_type"].isin(
         ["RAISE_MINIMUM", "BUSY"]
     ).sum())
+    estimated_theo_impact = float(
+        floor_df.loc[
+            floor_df["action_type"].isin(["RAISE_MINIMUM", "LOWER_MINIMUM"]),
+            "estimated_theo_delta_per_hour",
+        ].sum()
+    )
 
-    kpi_1, kpi_2, kpi_3, kpi_4 = st.columns(4)
+    kpi_1, kpi_2, kpi_3, kpi_4, kpi_5 = st.columns(5)
     kpi_1.metric("Active table visits (1 min)", active_customers)
     kpi_2.metric("Floor occupancy", f"{floor_occupancy:.0%}")
     kpi_3.metric("Crowded tables", crowded_tables)
     kpi_4.metric("Minimum changes", changes_needed)
+    kpi_5.metric(
+        "Est. Theo impact / hr",
+        f"{'-' if estimated_theo_impact < 0 else '+'}HK${abs(estimated_theo_impact):,.0f}",
+        help="Scenario estimate for the currently recommended minimum changes, not a guaranteed result.",
+    )
 
     # Keep the map full-width so every table tile has enough room for its live
     # signage. Guidance follows below instead of squeezing the floor sideways.
@@ -647,6 +663,21 @@ if not floor_df.empty:
                 else f"HK${int(r['suggested_limit_min'])}"
             ),
             axis=1,
+        )
+        plot_df["seat_impact_label"] = plot_df.apply(
+            lambda r: (
+                f"Release {abs(int(r['estimated_seat_delta']))} seat(s)"
+                if r["estimated_seat_delta"] < 0
+                else (
+                    f"Fill {int(r['estimated_seat_delta'])} seat(s)"
+                    if r["estimated_seat_delta"] > 0
+                    else "No modeled seat change"
+                )
+            ),
+            axis=1,
+        )
+        plot_df["theo_impact_label"] = plot_df["estimated_theo_delta_per_hour"].apply(
+            lambda value: f"{'-' if value < 0 else '+'}HK${abs(float(value)):,.0f}/hr"
         )
         # Distinct one-minute visitors can exceed physical seats as people turn
         # over. The on-floor sign shows occupied seats, capped at capacity.
@@ -708,14 +739,20 @@ if not floor_df.empty:
                         "Theo Win: $%{customdata[9]:,.0f}<br>"
                         "Current betting range: %{customdata[10]}<br>"
                         "Suggested starting minimum: %{customdata[11]}<br>"
-                        "Why: %{customdata[12]}"
+                        "Why: %{customdata[12]}<br>"
+                        "Estimated seat impact: %{customdata[13]}<br>"
+                        "Theo/hour now: HK$%{customdata[14]:,.0f}<br>"
+                        "Projected Theo/hour: HK$%{customdata[15]:,.0f}<br>"
+                        "Estimated Theo impact: %{customdata[16]}<br>"
+                        "Impact confidence: %{customdata[17]}"
                         "<extra></extra>"
                     ),
                     customdata=rows[[
                         "table_id", "game_type", "action_type", "active_players",
                         "seat_capacity", "occupancy_pct", "pit_occupancy_pct", "bets",
                         "avg_bet", "theo_win_window", "limit_label", "suggested_label",
-                        "recommendation_reason",
+                        "recommendation_reason", "seat_impact_label", "current_theo_per_hour",
+                        "projected_theo_per_hour", "theo_impact_label", "impact_confidence",
                     ]].values,
                 ))
 
@@ -802,18 +839,34 @@ if not floor_df.empty:
         )
         if not priority_df.empty:
             st.markdown("**Recommended changes now**")
+            priority_df["estimated_outcome"] = priority_df.apply(
+                lambda r: (
+                    f"HK${int(r['limit_min']):,} -> HK${int(r['suggested_limit_min']):,}; "
+                    f"{'release' if r['estimated_seat_delta'] < 0 else 'fill'} "
+                    f"{abs(int(r['estimated_seat_delta']))} seat(s); "
+                    f"Theo/hr {'-' if r['estimated_theo_delta_per_hour'] < 0 else '+'}"
+                    f"HK${abs(float(r['estimated_theo_delta_per_hour'])):,.0f}"
+                ),
+                axis=1,
+            )
             show_cols = ["table_id", "pit_group", "action_type", "active_players",
                          "seat_capacity", "occupancy_pct", "pit_occupancy_pct",
-                         "limit_min", "suggested_limit_min"]
+                         "estimated_outcome", "impact_confidence"]
             st.dataframe(
                 priority_df[show_cols].rename(columns={
                     "table_id": "Table", "pit_group": "Pit",
                     "action_type": "Action", "active_players": "Customers",
                     "seat_capacity": "Capacity", "occupancy_pct": "Occupancy %",
-                    "pit_occupancy_pct": "Pit Avg %", "limit_min": "Current Min",
-                    "suggested_limit_min": "Suggested Min",
+                    "pit_occupancy_pct": "Pit Avg %", "estimated_outcome": "Estimated outcome",
+                    "impact_confidence": "Confidence",
                 }),
                 hide_index=True, use_container_width=True, height=260,
+            )
+            st.caption(
+                "Impact scenario uses the latest one-minute table/pit Theo rate. Raising a minimum "
+                "assumes roughly 20% of occupied seats are released; lowering captures half of the "
+                "within-pit occupancy gap. Wager-intensity changes are capped, and confidence reflects "
+                "the number of bets observed in the window."
             )
         else:
             st.info("No starting-minimum changes are needed in the latest window.")

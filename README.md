@@ -12,6 +12,7 @@ A reference demo showing **RisingWave** as a streaming feature store for persona
 
 - **Live Table Demand Balancer:** the 36-position floor now has 24 baccarat tables, 4 blackjack tables, and 8 standard slot machines; the former penny-slot area is an 8-table entry baccarat pit. One-minute occupancy can trigger **RAISE_MINIMUM** or **LOWER_MINIMUM** only for baccarat and blackjack. Slots remain visible as **MONITOR_ONLY** and never receive minimum-limit recommendations. Only the starting minimum changes; the maximum stays fixed.
 - **Macau-style live floor labels:** baccarat squares and blackjack circles show current `HK$` starting minimum and occupied seats/capacity directly on each marker; displayed seats are capped at physical capacity, while full IDs and distinct one-minute visitors remain available on hover. Slot machines use stars and show occupancy only. The left and VIP baccarat pits share aligned rows, while Blackjack sits below the main pit so the map remains readable on narrow screens.
+- **Operational impact scenarios:** every raise/lower recommendation includes estimated seats released or filled, current and projected Theo per hour, estimated Theo impact per hour, and a confidence grade. The conservative scenario uses the latest one-minute table/pit Theo rate, assumes a raise releases roughly 20% of occupied seats, and assumes a lower minimum captures half of the within-pit occupancy gap.
 - **Stateful chat memory:** the sidebar LLM agent now keeps conversation context across reruns and follow-up questions within the same chat session.
 - **SQL-backed chat persistence:** chat history is stored in a `chat_messages` table. By default this uses RisingWave, but the storage layer is abstracted so it can be switched to Postgres later without changing the app call sites.
 - **Clear-on-delete behavior:** pressing **Clear Chat** deletes the persisted rows for that chat session, resets Streamlit `session_state`, and starts a fresh session.
@@ -92,7 +93,8 @@ Computed inline in `mv_player_session_features` per bet, then aggregated:
 | `mv_table_latest`               | Active tables in the latest floor-wide one-minute window; tables without current activity no longer retain stale counts |
 | `mv_table_live_load`            | All 36 tables joined with the current floor window, including zero-activity tables and capacity-based occupancy |
 | `mv_pit_live_load`              | Weighted occupancy plus hottest/coldest table occupancy for each comparable pit |
-| `mv_table_recommendations`      | One row per position with occupancy and pit comparison; baccarat/blackjack may receive RAISE_MINIMUM / LOWER_MINIMUM, while slots are always MONITOR_ONLY |
+| `mv_table_recommendation_signals` | Base occupancy, pit comparison, minimum-limit action, and explanation for each position |
+| `mv_table_recommendations`      | Final recommendation plus estimated seat impact, current/projected Theo per hour, Theo delta, and confidence; slots remain MONITOR_ONLY |
 
 ## LLM Chat Agent
 
@@ -128,6 +130,7 @@ Sample questions:
 - Business-rule layer (actionable recommendations) expressed purely in SQL
 - One-minute floor-wide occupancy clock that correctly resets inactive tables to zero
 - Within-pit demand balancing through capacity-aware baccarat/blackjack starting-minimum recommendations; slots are load-monitoring only
+- Streaming operational impact scenarios that translate each minimum change into estimated seat movement and Theo-per-hour change
 
 ## Quick Start
 
