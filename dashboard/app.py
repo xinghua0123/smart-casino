@@ -24,6 +24,7 @@ RW_PORT = os.environ.get("RISINGWAVE_PORT", "4566")
 RW_USER = os.environ.get("RISINGWAVE_USER", "root")
 RW_DBNAME = os.environ.get("RISINGWAVE_DBNAME", "dev")
 REFRESH_INTERVAL = 5
+CHAT_STORE_RETRY_INTERVAL = 15
 CHAT_SESSION_PARAM = "chat_session"
 CHAT_STORE = SqlChatStore.from_env(
     default_host=RW_HOST,
@@ -46,9 +47,8 @@ BASELINE = {
 # House edge constants shown in the explanation card (must match 02_feature_mvs.sql)
 HOUSE_EDGES = {
     "Slots":     0.0750,
-    "Roulette":  0.0526,
+    "Baccarat":  0.0115,
     "Blackjack": 0.0075,
-    "Poker":     0.0250,
 }
 
 EXAMPLE_QUESTIONS = [
@@ -77,6 +77,26 @@ def get_chat_store_connection():
     return st.session_state.chat_store_conn
 
 
+def _drop_chat_store_connection() -> None:
+    conn = st.session_state.pop("chat_store_conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _mark_chat_store_unavailable() -> None:
+    st.session_state.chat_store_unavailable = True
+    st.session_state.chat_store_retry_at = time.monotonic() + CHAT_STORE_RETRY_INTERVAL
+    _drop_chat_store_connection()
+
+
+def _mark_chat_store_available() -> None:
+    st.session_state.chat_store_unavailable = False
+    st.session_state.pop("chat_store_retry_at", None)
+
+
 def _get_query_param(name: str) -> str | None:
     value = st.query_params.get(name)
     if isinstance(value, list):
@@ -101,29 +121,77 @@ def get_chat_session_id() -> str:
 
 
 def load_chat_history() -> list[dict]:
-    conn = get_chat_store_connection()
-    return CHAT_STORE.load_messages(conn, get_chat_session_id())
+    try:
+        conn = get_chat_store_connection()
+        _flush_pending_chat_deletions(conn)
+        messages = CHAT_STORE.load_messages(conn, get_chat_session_id())
+        st.session_state.chat_history_loaded = True
+        _mark_chat_store_available()
+        return messages
+    except Exception:
+        st.session_state.chat_history_loaded = False
+        _mark_chat_store_unavailable()
+        return []
+
+
+def _flush_pending_chat_deletions(conn) -> None:
+    pending = st.session_state.get("pending_chat_deletions", [])
+    for session_id in pending:
+        CHAT_STORE.clear_session(conn, session_id)
+    st.session_state.pending_chat_deletions = []
+
+
+def persist_chat_history() -> None:
+    """Best-effort sync; session_state remains authoritative during outages."""
+    try:
+        conn = get_chat_store_connection()
+        _flush_pending_chat_deletions(conn)
+        for index, message in enumerate(st.session_state.chat_history):
+            CHAT_STORE.append_message(
+                conn, get_chat_session_id(), index, message
+            )
+        st.session_state.chat_history_loaded = True
+        _mark_chat_store_available()
+    except Exception:
+        _mark_chat_store_unavailable()
 
 
 def append_chat_message(message: dict) -> None:
     st.session_state.chat_history.append(message)
-    conn = get_chat_store_connection()
-    CHAT_STORE.append_message(
-        conn,
-        get_chat_session_id(),
-        len(st.session_state.chat_history) - 1,
-        message,
-    )
+    persist_chat_history()
 
 
 def clear_chat_session() -> None:
-    conn = get_chat_store_connection()
-    CHAT_STORE.clear_session(conn, get_chat_session_id())
+    old_session_id = get_chat_session_id()
+    try:
+        conn = get_chat_store_connection()
+        CHAT_STORE.clear_session(conn, old_session_id)
+        _flush_pending_chat_deletions(conn)
+        _mark_chat_store_available()
+    except Exception:
+        pending = st.session_state.setdefault("pending_chat_deletions", [])
+        if old_session_id not in pending:
+            pending.append(old_session_id)
+        _mark_chat_store_unavailable()
+
     st.session_state.chat_history = []
+    st.session_state.chat_history_loaded = False
     st.session_state.chat_active = False
     st.session_state.pop("pending_question", None)
     st.session_state.chat_session_id = _new_chat_session_id()
     _set_query_param(CHAT_SESSION_PARAM, st.session_state.chat_session_id)
+
+
+def retry_chat_store_if_due() -> None:
+    if not st.session_state.get("chat_store_unavailable", False):
+        return
+    if time.monotonic() < st.session_state.get("chat_store_retry_at", 0):
+        return
+
+    if st.session_state.chat_history:
+        persist_chat_history()
+    else:
+        st.session_state.chat_history = load_chat_history()
 
 
 def query(sql: str) -> pd.DataFrame:
@@ -146,7 +214,13 @@ st.set_page_config(page_title="Smart Casino Floor", layout="wide")
 
 _ = get_chat_session_id()
 if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+    st.session_state.chat_history_loaded = False
+if not st.session_state.chat_history_loaded and not st.session_state.get(
+    "chat_store_unavailable", False
+):
     st.session_state.chat_history = load_chat_history()
+retry_chat_store_if_due()
 if "chat_active" not in st.session_state:
     st.session_state.chat_active = False
 
@@ -156,6 +230,11 @@ if "chat_active" not in st.session_state:
 with st.sidebar:
     st.header("AI Data Agent")
     st.caption("Ask questions about the live casino data in natural language.")
+    if st.session_state.get("chat_store_unavailable", False):
+        st.warning(
+            "Chat persistence is temporarily unavailable. This browser session "
+            "will keep working and retry automatically."
+        )
 
     # --- LLM provider config ---
     provider = st.selectbox("LLM Provider", ["Claude", "OpenAI", "OpenRouter", "Azure OpenAI"],
@@ -260,8 +339,7 @@ cur_df = query("""
         AVG(effective_house_edge) AS avg_house_edge,
         AVG(win_rate) AS avg_win_rate,
         MAX(window_end) AS latest_window
-    FROM mv_player_features
-    WHERE window_start = (SELECT MAX(window_start) FROM mv_player_features)
+    FROM mv_player_latest_features
 """)
 
 if not cur_df.empty and cur_df["active_players"].iloc[0] is not None and int(cur_df["active_players"].iloc[0]) > 0:
@@ -477,8 +555,8 @@ with theo_right:
     st.markdown(edge_lines)
     st.caption(
         "**Theo Win** = Σ(bet × house_edge). The casino's expected profit regardless of short-term luck. "
-        "Effective house edge = Theo Win ÷ Total Wagered — a player shifting from slots to blackjack "
-        "lowers this number even if they bet more."
+        "Effective house edge = Theo Win ÷ Total Wagered — a player shifting from slots to baccarat "
+        "or blackjack lowers this number even if they bet more."
     )
     st.caption(
         "Reinvestment tiers (offer_value): **40%** of theo for urgent retention, **35%** for VIP upgrade, "
@@ -488,45 +566,68 @@ with theo_right:
 st.divider()
 
 # ================================================================
-# Casino Floor Plan — per-table live view + raise/lower-limit recommendations
+# Casino Floor Plan — live occupancy + starting-minimum recommendations
 # ================================================================
-st.subheader("Casino Floor Plan")
+st.subheader("Live Table Demand Balancer")
 st.caption(
-    "Live map of the gaming floor. Each marker is one table — shape = game type, "
-    "color = recommended action (raise / lower limit, hot, cold, hold). "
-    "Hover a table for live stats (active players, avg bet, theo win, suggested new limits). "
-    "Rules use foot traffic + bet segmentation — tune the thresholds to match the property."
+    "Each marker is one table. The latest one-minute active-customer count is compared "
+    "with capacity and other tables in the same pit. Baccarat and blackjack tables may "
+    "receive a new starting minimum to rebalance demand; slot machines are monitored "
+    "for load only. The maximum limit is never changed."
 )
 
 floor_df = query("""
-    SELECT table_id, game_type, table_x, table_y,
-           limit_min, limit_max,
+    SELECT table_id, game_type, pit_group, table_x, table_y,
+           seat_capacity, limit_min, limit_max,
            active_players, bets,
            ROUND(avg_bet::numeric, 0)         AS avg_bet,
            ROUND(max_bet::numeric, 0)         AS max_bet,
            ROUND(total_bet::numeric, 0)       AS total_bet,
            ROUND(theo_win_window::numeric, 0) AS theo_win_window,
+           ROUND((occupancy_rate * 100)::numeric, 0) AS occupancy_pct,
+           ROUND((pit_occupancy_rate * 100)::numeric, 0) AS pit_occupancy_pct,
            action_type,
            suggested_limit_min,
-           suggested_limit_max
+           recommendation_reason
     FROM mv_table_recommendations
 """)
 
 ACTION_COLORS = {
-    "RAISE_LIMIT":  "#e74c3c",  # red — push the ceiling up
-    "LOWER_LIMIT":  "#3498db",  # blue — drop the floor to attract traffic
-    "HOT":          "#f39c12",  # orange — healthy, keep an eye on it
-    "COLD":         "#7f8c8d",  # grey — empty
-    "HOLD":         "#2ecc71",  # green — balanced, no change needed
+    "RAISE_MINIMUM": "#ef4444",  # crowded: redirect demand away
+    "LOWER_MINIMUM": "#38bdf8",  # underused: attract peer overflow
+    "BUSY":          "#f59e0b",  # high occupancy without a cold peer
+    "IDLE":          "#64748b",  # low occupancy without a busy peer
+    "BALANCED":      "#22c55e",  # target operating range
+    "MONITOR_ONLY":  "#94a3b8",  # slots: load visibility, no limit action
 }
 GAME_SYMBOLS = {
-    "slots":     "square",
-    "baccarat":  "star",
+    "slots":     "star",
+    "baccarat":  "square",
     "blackjack": "circle",
 }
 
 if not floor_df.empty:
-    floor_left, floor_right = st.columns([2, 1])
+    active_customers = int(floor_df["active_players"].sum())
+    total_capacity = int(floor_df["seat_capacity"].sum())
+    occupied_capacity = floor_df[["active_players", "seat_capacity"]].min(axis=1).sum()
+    floor_occupancy = occupied_capacity / total_capacity if total_capacity else 0.0
+    changes_needed = int(floor_df["action_type"].isin(
+        ["RAISE_MINIMUM", "LOWER_MINIMUM"]
+    ).sum())
+    crowded_tables = int(floor_df["action_type"].isin(
+        ["RAISE_MINIMUM", "BUSY"]
+    ).sum())
+
+    kpi_1, kpi_2, kpi_3, kpi_4 = st.columns(4)
+    kpi_1.metric("Active table visits (1 min)", active_customers)
+    kpi_2.metric("Floor occupancy", f"{floor_occupancy:.0%}")
+    kpi_3.metric("Crowded tables", crowded_tables)
+    kpi_4.metric("Minimum changes", changes_needed)
+
+    # Keep the map full-width so every table tile has enough room for its live
+    # signage. Guidance follows below instead of squeezing the floor sideways.
+    floor_left = st.container()
+    floor_right = st.container()
 
     with floor_left:
         # Build the floor map with go.Figure directly (not px.scatter) so every
@@ -537,14 +638,34 @@ if not floor_df.empty:
         # render one trace per (game, action) combination with hard-coded size.
         plot_df = floor_df.copy()
         plot_df["limit_label"] = plot_df.apply(
-            lambda r: f"${int(r['limit_min'])}-${int(r['limit_max'])}", axis=1
+            lambda r: f"HK${int(r['limit_min'])}-HK${int(r['limit_max'])}",
+            axis=1,
         )
         plot_df["suggested_label"] = plot_df.apply(
-            lambda r: f"${int(r['suggested_limit_min'])}-${int(r['suggested_limit_max'])}",
+            lambda r: (
+                "N/A (monitor only)" if r["game_type"] == "slots"
+                else f"HK${int(r['suggested_limit_min'])}"
+            ),
+            axis=1,
+        )
+        # Distinct one-minute visitors can exceed physical seats as people turn
+        # over. The on-floor sign shows occupied seats, capped at capacity.
+        plot_df["display_players"] = plot_df[[
+            "active_players", "seat_capacity"
+        ]].min(axis=1).astype(int)
+        plot_df["map_label"] = plot_df.apply(
+            lambda r: (
+                f"<b>{int(r['display_players'])}/{int(r['seat_capacity'])}</b>"
+                if r["game_type"] == "slots"
+                else (
+                    f"<b>HK${int(r['limit_min'])}</b>"
+                    f"<br>{int(r['display_players'])}/{int(r['seat_capacity'])}"
+                )
+            ),
             axis=1,
         )
 
-        MARKER_SIZE = 30  # Fixed pixel size for every tile. Do not derive from data.
+        MARKER_SIZE = 46  # Two-line table signage that remains readable on narrow screens.
 
         fig_floor = go.Figure()
         for game in ["slots", "baccarat", "blackjack"]:
@@ -552,7 +673,10 @@ if not floor_df.empty:
             game_rows = plot_df[plot_df["game_type"] == game]
             if game_rows.empty:
                 continue
-            for action in ["RAISE_LIMIT", "LOWER_LIMIT", "HOT", "COLD", "HOLD"]:
+            for action in [
+                "RAISE_MINIMUM", "LOWER_MINIMUM", "BUSY", "IDLE",
+                "BALANCED", "MONITOR_ONLY",
+            ]:
                 rows = game_rows[game_rows["action_type"] == action]
                 if rows.empty:
                     continue
@@ -567,33 +691,36 @@ if not floor_df.empty:
                         line=dict(width=1, color="#111"),
                         sizemode="diameter",
                     ),
-                    text=rows["table_id"],                         # machine label above tile
-                    textposition="top center",
-                    textfont=dict(size=13, color="#e5e7eb"),
+                    text=rows["map_label"],
+                    textposition="middle center",
+                    textfont=dict(size=9, color="#0b1220"),
                     name=f"{action}, {game}",
                     legendgroup=action,
                     hovertemplate=(
                         "<b>%{customdata[0]}</b><br>"
                         "Game: %{customdata[1]}<br>"
                         "Action: %{customdata[2]}<br>"
-                        "Active players: %{customdata[3]}<br>"
-                        "Bets: %{customdata[4]}<br>"
-                        "Avg bet: $%{customdata[5]:,.0f}<br>"
-                        "Max bet: $%{customdata[6]:,.0f}<br>"
-                        "Theo Win: $%{customdata[7]:,.0f}<br>"
-                        "Current limit: %{customdata[8]}<br>"
-                        "Suggested limit: %{customdata[9]}"
+                        "Customers / capacity: %{customdata[3]} / %{customdata[4]}<br>"
+                        "Table occupancy: %{customdata[5]:.0f}%<br>"
+                        "Pit occupancy: %{customdata[6]:.0f}%<br>"
+                        "Bets: %{customdata[7]}<br>"
+                        "Avg bet: $%{customdata[8]:,.0f}<br>"
+                        "Theo Win: $%{customdata[9]:,.0f}<br>"
+                        "Current betting range: %{customdata[10]}<br>"
+                        "Suggested starting minimum: %{customdata[11]}<br>"
+                        "Why: %{customdata[12]}"
                         "<extra></extra>"
                     ),
                     customdata=rows[[
                         "table_id", "game_type", "action_type", "active_players",
-                        "bets", "avg_bet", "max_bet", "theo_win_window",
-                        "limit_label", "suggested_label",
+                        "seat_capacity", "occupancy_pct", "pit_occupancy_pct", "bets",
+                        "avg_bet", "theo_win_window", "limit_label", "suggested_label",
+                        "recommendation_reason",
                     ]].values,
                 ))
 
         fig_floor.update_layout(
-            title="Live Floor Map — tables by position, color = recommended action",
+            title="Live Floor Map — HK$ minimum | customers/seats",
         )
 
         # Pit labels — white, clearly ABOVE each cluster so they never sit
@@ -602,28 +729,28 @@ if not floor_df.empty:
         def _pit_label(x, y, text):
             fig_floor.add_annotation(
                 x=x, y=y, text=f"<b>{text}</b>", showarrow=False,
-                font=dict(size=18, color="#ffffff", family="Helvetica"),
+                font=dict(size=16, color="#ffffff", family="Helvetica"),
                 bgcolor="rgba(15,17,23,0.75)", borderpad=6,
                 xanchor="center", yanchor="middle",
             )
 
-        # Penny slots cluster: tiles at y=7.8 & 8.8 → label above top row
-        _pit_label(2.4, 10.1, "SLOTS (penny)")
+        # Baccarat left and VIP pits share y=7.5/8.5 for exact row alignment.
+        _pit_label(2.4, 10.1, "BACCARAT (left pit)")
         # Standard slots cluster: tiles at y=3.5 & 4.5 → label above top row
         _pit_label(2.4,  5.7, "SLOTS (standard)")
         # ——— BACCARAT standard pit: tiles at y=3.5 & 4.5, x=5.8-9.4 → label above ———
         _pit_label(7.6,  5.7, "BACCARAT pit")
         # ——— BACCARAT VIP room: tiles at y=7.5 & 8.5, x=5.8-9.4 → label above ———
         _pit_label(7.6, 10.1, "BACCARAT VIP")
-        # Blackjack pit: tiles at y=3.5 & 4.5, x=11.2-12.4 → label above
-        _pit_label(11.8, 5.7, "BLACKJACK")
+        # Blackjack pit sits below the main baccarat pit on narrow layouts.
+        _pit_label(7.6, 2.7, "BLACKJACK")
 
-        fig_floor.update_xaxes(visible=False, range=[-0.5, 13.6])
-        fig_floor.update_yaxes(visible=False, range=[0.8, 11.0],
+        fig_floor.update_xaxes(visible=False, range=[-0.5, 10.5])
+        fig_floor.update_yaxes(visible=False, range=[-0.2, 10.7],
                                scaleanchor="x", scaleratio=1)
         fig_floor.update_layout(
             height=760,
-            margin=dict(t=50, b=160, l=10, r=10),   # extra bottom room for legend
+            margin=dict(t=60, b=120, l=10, r=10),
             plot_bgcolor="#0e1117",
             paper_bgcolor="#0e1117",
             legend=dict(
@@ -638,51 +765,60 @@ if not floor_df.empty:
         st.plotly_chart(fig_floor, use_container_width=True)
 
     with floor_right:
-        st.markdown("**Action meanings**")
+        st.markdown("**Starting minimum guidance**")
         st.markdown(
-            "- 🔴 **RAISE_LIMIT** — packed (≥ 3 players) and avg bet is ≥ 70% of the "
-            "current ceiling. Push the max up to capture more theo.\n"
-            "- 🔵 **LOWER_LIMIT** — cold (≤ 1 player, fewer than 8 bets) and the min "
-            "is above entry-level. Drop it to pull in casual traffic.\n"
-            "- 🟠 **HOT** — healthy occupancy generating strong theo this window.\n"
-            "- ⚫ **COLD** — essentially no activity. Watch; no limit change yet.\n"
-            "- 🟢 **HOLD** — balanced. Leave it alone."
+            "- **RAISE_MINIMUM** — baccarat/blackjack occupancy is at least 85% while a peer in the same "
+            "pit is at or below 35%; raise one denomination step to redirect demand.\n"
+            "- **LOWER_MINIMUM** — baccarat/blackjack occupancy is at or below 35% while a peer is at least "
+            "85%; lower one denomination step to attract overflow.\n"
+            "- **MONITOR_ONLY** — slot load is visible, but no minimum-limit action is generated.\n"
+            "- **BUSY** — high demand across the pit; monitor before changing one table.\n"
+            "- **IDLE** — low demand without nearby overflow to redirect yet.\n"
+            "- **BALANCED** — occupancy is in the target operating range."
         )
         st.caption(
-            "Rules are a starting point. Casinos typically layer in weather, holidays, "
-            "player VIP mix, and nearby-table overflow — tune the thresholds in "
-            "`mv_table_recommendations` per property."
+            "Active customers are distinct players seen during the latest one-minute "
+            "window. Recommendations apply only to baccarat and blackjack and change "
+            "only the starting minimum. Baccarat/blackjack markers show current HK$ starting "
+            "minimum and occupied seats/capacity; slot stars show occupancy only. Displayed "
+            "seats are capped at physical capacity, while hover retains distinct one-minute "
+            "visitors. Full table IDs are available on hover. "
+            "Capacity, thresholds, and denomination floors are configured in "
+            "`05_floor_plan_mvs.sql`."
         )
 
         # Priority list of tables that need action
         action_priority = {
-            "RAISE_LIMIT": 1, "LOWER_LIMIT": 2, "HOT": 3, "COLD": 4, "HOLD": 5,
+            "RAISE_MINIMUM": 1, "LOWER_MINIMUM": 2,
+            "BUSY": 3, "IDLE": 4, "BALANCED": 5, "MONITOR_ONLY": 6,
         }
         priority_df = floor_df.copy()
         priority_df["priority"] = priority_df["action_type"].map(action_priority)
         priority_df = (
-            priority_df[priority_df["action_type"].isin(["RAISE_LIMIT", "LOWER_LIMIT"])]
-            .sort_values(["priority", "theo_win_window"], ascending=[True, False])
+            priority_df[priority_df["action_type"].isin(
+                ["RAISE_MINIMUM", "LOWER_MINIMUM"]
+            )]
+            .sort_values(["priority", "occupancy_pct"], ascending=[True, False])
         )
         if not priority_df.empty:
-            st.markdown("**Needs attention now**")
-            show_cols = ["table_id", "game_type", "action_type", "active_players",
-                         "avg_bet", "limit_min", "limit_max",
-                         "suggested_limit_min", "suggested_limit_max"]
+            st.markdown("**Recommended changes now**")
+            show_cols = ["table_id", "pit_group", "action_type", "active_players",
+                         "seat_capacity", "occupancy_pct", "pit_occupancy_pct",
+                         "limit_min", "suggested_limit_min"]
             st.dataframe(
                 priority_df[show_cols].rename(columns={
-                    "table_id": "Table", "game_type": "Game",
-                    "action_type": "Action", "active_players": "Players",
-                    "avg_bet": "Avg Bet", "limit_min": "Min",
-                    "limit_max": "Max", "suggested_limit_min": "→ Min",
-                    "suggested_limit_max": "→ Max",
+                    "table_id": "Table", "pit_group": "Pit",
+                    "action_type": "Action", "active_players": "Customers",
+                    "seat_capacity": "Capacity", "occupancy_pct": "Occupancy %",
+                    "pit_occupancy_pct": "Pit Avg %", "limit_min": "Current Min",
+                    "suggested_limit_min": "Suggested Min",
                 }),
                 hide_index=True, use_container_width=True, height=260,
             )
         else:
-            st.info("No tables currently flagged for a limit change — floor is balanced.")
+            st.info("No starting-minimum changes are needed in the latest window.")
 else:
-    st.info("Waiting for per-table data (first window finishes in ~5 min after restart)...")
+    st.info("Waiting for per-table data (the first one-minute window is still filling)...")
 
 st.divider()
 
@@ -692,9 +828,9 @@ bottom_left, bottom_right = st.columns(2)
 
 with bottom_left:
     game_dist = query("""
-        SELECT 'Slots' AS game, AVG(pct_slots) AS pct FROM mv_player_features
-        UNION ALL SELECT 'Baccarat', AVG(pct_baccarat) FROM mv_player_features
-        UNION ALL SELECT 'Blackjack', AVG(pct_blackjack) FROM mv_player_features
+        SELECT 'Slots' AS game, AVG(pct_slots) AS pct FROM mv_player_latest_features
+        UNION ALL SELECT 'Baccarat', AVG(pct_baccarat) FROM mv_player_latest_features
+        UNION ALL SELECT 'Blackjack', AVG(pct_blackjack) FROM mv_player_latest_features
     """)
     if not game_dist.empty:
         fig3 = px.pie(game_dist, values="pct", names="game", title="Game Type Distribution")
@@ -704,7 +840,7 @@ with bottom_left:
 with bottom_right:
     tier_dist = query("""
         SELECT tier, COUNT(DISTINCT player_id) AS players
-        FROM mv_player_features GROUP BY tier ORDER BY players DESC
+        FROM mv_player_latest_features GROUP BY tier ORDER BY players DESC
     """)
     if not tier_dist.empty:
         fig4 = px.bar(tier_dist, x="tier", y="players", title="Players by Tier", color="tier")

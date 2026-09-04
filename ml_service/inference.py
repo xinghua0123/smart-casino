@@ -62,11 +62,17 @@ def fetch_features(conn) -> pd.DataFrame:
         p.category_diversity,
         p.spend_per_minute,
         COALESCE(h.high_roller_similarity, 0.0) AS high_roller_similarity
-    FROM mv_player_features p
+    FROM mv_player_latest_features p
     LEFT JOIN mv_player_high_roller_similarity h
         ON p.player_id = h.player_id AND p.window_start = h.window_start
     """
-    return pd.read_sql(query, conn)
+    with conn.cursor() as cur:
+        cur.execute(query)
+        columns = [column[0] for column in cur.description]
+        features = pd.DataFrame(cur.fetchall(), columns=columns)
+    # The SQL view is unique by design; keep this guard at the inference
+    # boundary so a future schema change cannot fan out recommendation writes.
+    return features.drop_duplicates(subset=["player_id"], keep="last")
 
 
 def run_inference(models, df: pd.DataFrame) -> list[tuple]:
@@ -125,7 +131,7 @@ def main():
         try:
             conn = get_rw_connection()
             cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM mv_player_features")
+            cur.execute("SELECT COUNT(*) FROM mv_player_latest_features")
             count = cur.fetchone()[0]
             cur.close()
             if count > 0:
@@ -151,6 +157,15 @@ def main():
     print(f"Inference loop running every {INFERENCE_INTERVAL_S}s")
     cycle = 0
     while True:
+        if conn is None or conn.closed:
+            try:
+                conn = get_rw_connection()
+                print("RisingWave connection restored.")
+            except psycopg2.Error as e:
+                print(f"RisingWave unavailable, retrying: {e}")
+                time.sleep(INFERENCE_INTERVAL_S)
+                continue
+
         try:
             df = fetch_features(conn)
             predictions = run_inference(models, df)
@@ -163,12 +178,13 @@ def main():
                     f"Inference cycle {cycle}: {len(predictions)} predictions"
                 )
 
-        except psycopg2.OperationalError:
+        except psycopg2.Error:
             print("RisingWave connection lost, reconnecting...")
             try:
-                conn = get_rw_connection()
+                conn.close()
             except Exception:
                 pass
+            conn = None
         except Exception as e:
             print(f"Inference error: {e}")
 

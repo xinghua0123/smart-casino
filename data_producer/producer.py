@@ -73,20 +73,20 @@ GAME_TYPES = ["slots", "baccarat", "blackjack"]
 # Each table has a fixed (x, y) position on the floor, a game_type, and a live
 # betting-limit range. The floor-plan view on the dashboard uses (x, y) verbatim
 # for rendering, and the per-table MVs use limit_min/limit_max to decide whether
-# the limit should be raised (packed + betting near ceiling) or lowered
-# (cold + few players). Keep this in sync with `tables_dim` seed in 05_floor_plan_mvs.sql.
+# baccarat/blackjack limits should be adjusted from demand imbalance. Keep this
+# in sync with `tables_dim` seed in 05_floor_plan_mvs.sql.
 #
 #   Macau-style 3-game layout.
-#     Slots (left):    8 penny + 8 standard  = 16 tables — casual volume
-#     Baccarat (mid):  8 standard + 8 VIP    = 16 tables — the hero
-#     Blackjack (rgt): 4 tables              =  4 tables — secondary pit
+#     Slots (left):    8 standard             =  8 machines — casual volume
+#     Baccarat:        8 left + 8 main + 8 VIP = 24 tables — the hero
+#     Blackjack (lower): 4 tables            =  4 tables — secondary pit
 #   Total 36 tables.
 TABLE_LAYOUT: list[tuple[str, str, float, float, float, float]] = (
-    # Penny slots — 4x2 grid (low limits, near entrance, top-left)
-    [(f"slots_{i:02d}", "slots",
+    # Baccarat left pit — 4x2 grid (entry-level tables, top-left)
+    [(f"bac_left_{i:02d}", "baccarat",
       0.6 + ((i - 1) % 4) * 1.2,
-      7.8 + ((i - 1) // 4) * 1.0,
-      1.0, 10.0) for i in range(1, 9)]
+      7.5 + ((i - 1) // 4) * 1.0,
+      50.0, 500.0) for i in range(1, 9)]
     # Standard slots — 4x2 grid (mid-left)
     + [(f"slots_{i:02d}", "slots",
         0.6 + ((i - 9) % 4) * 1.2,
@@ -102,10 +102,10 @@ TABLE_LAYOUT: list[tuple[str, str, float, float, float, float]] = (
         5.8 + ((i - 1) % 4) * 1.2,
         7.5 + ((i - 1) // 4) * 1.0,
         500.0, 10000.0) for i in range(1, 9)]
-    # Blackjack — single 2x2 pit on the right
+    # Blackjack — single 2x2 pit below the main baccarat pit
     + [(f"bj_{i:02d}", "blackjack",
-        11.2 + ((i - 1) % 2) * 1.2,
-        3.5 + ((i - 1) // 2) * 1.0,
+        7.0 + ((i - 1) % 2) * 1.2,
+        0.6 + ((i - 1) // 2) * 1.0,
         25.0, 500.0) for i in range(1, 5)]
 )
 

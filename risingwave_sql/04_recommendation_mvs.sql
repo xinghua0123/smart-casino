@@ -64,7 +64,7 @@ SELECT
     END AS offer_value,
     r.ts AS recommendation_ts
 FROM recommendations_tbl r
-LEFT JOIN mv_player_features f
+LEFT JOIN mv_player_latest_features f
     ON r.player_id = f.player_id;
 
 
@@ -110,11 +110,10 @@ CREATE MATERIALIZED VIEW mv_theo_by_tier AS
 SELECT
     f.tier,
     COUNT(DISTINCT f.player_id)           AS players,
-    SUM(t.cumulative_theo_win)            AS total_theo_win,
-    AVG(t.cumulative_theo_win)            AS avg_theo_per_player,
-    AVG(t.effective_house_edge)           AS avg_effective_house_edge
-FROM mv_player_features f
-JOIN mv_player_theo_cumulative t ON f.player_id = t.player_id
+    SUM(f.cumulative_theo_win)            AS total_theo_win,
+    AVG(f.cumulative_theo_win)            AS avg_theo_per_player,
+    AVG(f.effective_house_edge)           AS avg_effective_house_edge
+FROM mv_player_latest_features f
 GROUP BY f.tier;
 
 
@@ -127,4 +126,4 @@ SELECT
     SUM(total_bet)              AS total_wagered,
     SUM(theo_win_window)        AS theo_win_window,
     AVG(effective_house_edge)   AS avg_house_edge
-FROM mv_player_features;
+FROM mv_player_latest_features;

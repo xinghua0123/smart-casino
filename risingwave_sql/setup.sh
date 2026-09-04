@@ -17,7 +17,7 @@ done
 FAILED=0
 for f in /sql/01_sources.sql /sql/02_feature_mvs.sql /sql/03_high_roller_mvs.sql /sql/04_recommendation_mvs.sql /sql/05_floor_plan_mvs.sql; do
     echo "Running $f ..."
-    if ! psql -h "$RW_HOST" -p "$RW_PORT" -U root -d dev -f "$f"; then
+    if ! psql -v ON_ERROR_STOP=1 -h "$RW_HOST" -p "$RW_PORT" -U root -d dev -f "$f"; then
         echo "WARNING: $f had errors (continuing)"
         FAILED=1
     fi

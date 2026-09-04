@@ -14,6 +14,7 @@
 -- reinvestment (offers, comps) is typically set as 25–40% of cumulative theo.
 -- ============================================================
 
+DROP MATERIALIZED VIEW IF EXISTS mv_player_latest_features CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS mv_player_features CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS mv_player_session_features CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS mv_player_fnb_features CASCADE;
@@ -138,3 +139,20 @@ LEFT JOIN mv_player_hotel_features h
     ON g.player_id = h.player_id AND g.window_start = h.window_start
 LEFT JOIN mv_player_theo_cumulative t
     ON g.player_id = t.player_id;
+
+
+-- Current feature snapshot: exactly one latest window per player.
+-- Keep the windowed feature store above for history, but use this bounded view
+-- for inference and current-state dashboards to avoid many-to-many joins.
+CREATE MATERIALIZED VIEW mv_player_latest_features AS
+SELECT p.*
+FROM mv_player_features AS p
+JOIN (
+    SELECT
+        player_id,
+        MAX(window_start) AS latest_window_start
+    FROM mv_player_features
+    GROUP BY player_id
+) AS latest
+    ON p.player_id = latest.player_id
+   AND p.window_start = latest.latest_window_start;
