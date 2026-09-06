@@ -1,209 +1,187 @@
-"""Generate architecture diagram for Smart Casino Floor demo."""
+"""Render the implemented 2.0 architecture as PNG and SVG (no services needed).
 
+Run: python3 architecture.py
+Dependency: matplotlib. Outputs are relative to this file, not the caller's cwd.
+"""
+from pathlib import Path
+import os
+import tempfile
+
+os.environ.setdefault("XDG_CACHE_HOME", str(Path(tempfile.gettempdir()) / "casino-diagram-cache"))
+os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "casino-diagram-mpl"))
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch
+from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+from matplotlib.path import Path as MplPath
 
-fig, ax = plt.subplots(1, 1, figsize=(20, 12))
-ax.set_xlim(0, 20)
-ax.set_ylim(0, 12)
-ax.axis("off")
-fig.patch.set_facecolor("white")
+ROOT = Path(__file__).resolve().parent
+BG = "#0c1423"
+PANEL = "#142236"
+TEXT = "#e8f0fa"
+MUTED = "#a9bad0"
+BLUE = "#82b9f7"
+TEAL = "#6dd9c0"
+GOLD = "#f2bf6b"
+PURPLE = "#c4a0ef"
+BORDER = "#30445f"
 
-# --- Colors ---
-C_KAFKA   = "#FF6B35"
-C_RW_BG   = "#E8F4FD"
-C_RW_COMP = "#1A73E8"
-C_RW_NEW  = "#0F9D58"   # Theo Win / house-edge highlight color
-C_ML      = "#7B2D8E"
-C_DASH    = "#0D9488"
-C_AGENT   = "#C026D3"
-C_PROD    = "#475569"
-C_ARROW   = "#64748B"
-C_TEXT    = "#1E293B"
 
-def box(x, y, w, h, color, label, fontsize=9, textcolor="white", bold=False):
-    b = FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.15",
-                       facecolor=color, edgecolor="none", zorder=3)
-    ax.add_patch(b)
-    weight = "bold" if bold else "normal"
-    ax.text(x + w/2, y + h/2, label, ha="center", va="center",
-            fontsize=fontsize, color=textcolor, weight=weight, zorder=4)
+def render():
+    plt.rcParams.update({"font.family": "DejaVu Sans", "svg.fonttype": "none"})
+    fig = plt.figure(figsize=(22, 14.6), facecolor=BG)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set(xlim=(0, 2200), ylim=(1460, 0))
+    ax.axis("off")
 
-def arrow(x1, y1, x2, y2, label="", color=C_ARROW, style="->"):
-    ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
-                arrowprops=dict(arrowstyle=style, color=color, lw=1.5),
-                zorder=2)
-    if label:
-        mx, my = (x1+x2)/2, (y1+y2)/2
-        ax.text(mx, my + 0.2, label, ha="center", va="bottom",
-                fontsize=7, color=color, style="italic", zorder=4)
+    def label(x, y, value, size=13, color=TEXT, weight="normal", ha="left"):
+        return ax.text(x, y, value, fontsize=size, color=color, weight=weight,
+                       ha=ha, va="top", linespacing=1.5, zorder=5)
 
-# --- Title ---
-ax.text(10, 11.5, "Smart Casino Floor — RisingWave + ML + Theoretical Win",
-        ha="center", va="center", fontsize=17, weight="bold", color=C_TEXT)
-ax.text(10, 11.0,
-        "Real-time streaming feature store · High-roller lookalike detection · TheoWin / house-edge economics · LLM chat agent",
-        ha="center", va="center", fontsize=9.5, color="#475569", style="italic")
+    def box(x, y, w, h, accent=BORDER, fill=PANEL, radius=16):
+        ax.add_patch(FancyBboxPatch((x, y), w, h,
+                     boxstyle=f"round,pad=0,rounding_size={radius}",
+                     facecolor=fill, edgecolor=accent, linewidth=1.3, zorder=2))
 
-# === Left: Data Sources ===
-box(0.3, 8.3, 2.2, 0.7, C_PROD, "Gaming Events\n(slots, roulette,\nblackjack, poker)", 8)
-box(0.3, 7.3, 2.2, 0.7, C_PROD, "F&B Events\n(dining, drinks)", 8)
-box(0.3, 6.3, 2.2, 0.7, C_PROD, "Hotel Events\n(stays, spa, minibar)", 8)
-ax.text(1.4, 9.5, "Data Producer\n(simulated player streams)",
-        ha="center", fontsize=8, color=C_PROD, weight="bold")
+    def line(points, color=BLUE, dashed=False, width=1.7):
+        path = MplPath(points, [MplPath.MOVETO] + [MplPath.LINETO] * (len(points)-1))
+        ax.add_patch(FancyArrowPatch(path=path, arrowstyle="-|>", mutation_scale=15,
+                     linewidth=width, color=color, linestyle=(0, (5, 4)) if dashed else "-", zorder=3))
 
-# === Kafka ===
-box(3.5, 7.0, 1.8, 2.2, C_KAFKA, "Apache\nKafka\n\n3 topics", 10, bold=True)
-arrow(2.5, 8.6, 3.5, 8.4, "")
-arrow(2.5, 7.65, 3.5, 7.9, "")
-arrow(2.5, 6.65, 3.5, 7.4, "")
+    def badge(x, y, text, color):
+        label(x, y, text, size=10, color=color, weight="bold")
 
-# === RisingWave box (large container) ===
-rw_rect = FancyBboxPatch((6, 2.8), 7.2, 7.7, boxstyle="round,pad=0.2",
-                          facecolor=C_RW_BG, edgecolor=C_RW_COMP,
-                          linewidth=2, zorder=1)
-ax.add_patch(rw_rect)
-ax.text(9.6, 10.15, "RisingWave (streaming SQL)", ha="center", fontsize=13,
-        weight="bold", color=C_RW_COMP)
+    label(60, 46, "SMART CASINO FLOOR / 2.0", 12, TEAL, "bold")
+    label(60, 88, "Observe. Compare. Approve. Measure.", 30, TEXT, "bold")
+    label(60, 153, "Implemented demo architecture · Streaming observations and manager-reviewed actions", 15, MUTED)
 
-# --- RW: Sources ---
-box(6.3, 8.5, 1.9, 0.8, C_RW_COMP, "Kafka Sources\n(3 streams)", 9)
-arrow(5.3, 8.1, 6.3, 8.7, "Ingest")
+    # Main operational path. All observed state reaches the service through RW.
+    badge(60, 235, "01  PHYSICAL STATE", TEAL)
+    box(60, 272, 325, 295, TEAL)
+    label(82, 295, "Floor simulator", 19, TEXT, "bold")
+    label(82, 340, "36 positions · seats & queues\nTables, minimums & dealers\n10× clock · physical receipts", 13, MUTED)
+    ax.plot([82, 363], [450, 450], color=BORDER, lw=1)
+    label(82, 466, "Durable floor state", 12, TEAL, "bold")
+    label(82, 499, "simulator-state / floor.json", 11, MUTED)
 
-# --- RW: Feature MVs (gaming/FNB/hotel session) ---
-box(6.3, 6.9, 1.9, 1.2, C_RW_COMP,
-    "Session\nFeature MVs\n\nTUMBLE 5-min\nper player", 8)
-arrow(7.25, 8.5, 7.25, 8.1, "TUMBLE\nwindows", C_RW_COMP)
+    badge(465, 235, "02  EVENT TRANSPORT", BLUE)
+    box(465, 272, 290, 295)
+    label(487, 295, "Apache Kafka", 19, TEXT, "bold")
+    label(487, 344, "operational_events\ngaming_events\nfnb_events\nhotel_events", 13, MUTED)
+    label(487, 503, "4 active input streams", 12, BLUE, "bold")
 
-# --- RW: Theo Win MVs (new, highlighted) ---
-box(8.5, 6.9, 2.1, 1.2, C_RW_NEW,
-    "Theo Win MVs\n\ntheo_win_window\ncumulative_theo_win\neffective_house_edge", 8, bold=True)
-arrow(8.2, 7.5, 8.5, 7.5, "", C_RW_NEW)
+    badge(835, 235, "03  STREAMING SQL", BLUE)
+    box(835, 272, 400, 760, BLUE, "#112439")
+    label(859, 295, "RisingWave", 21, TEXT, "bold")
+    box(859, 351, 352, 190, BORDER, "#172f49", 10)
+    label(880, 372, "Operational state MVs", 15, BLUE, "bold")
+    label(880, 414, "mv_ops_latest_snapshot\nmv_ops_table_state\nmv_ops_pit_state", 12, TEXT)
+    label(859, 570, "Player feature MVs", 16, TEXT, "bold")
+    label(859, 615, "5-minute windows · cumulative Theo\nLatest feature row per player", 12, MUTED)
+    ax.plot([859, 1211], [705, 705], color=BORDER, lw=1)
+    label(859, 736, "Prediction + rule views", 16, TEXT, "bold")
+    label(859, 780, "recommendations_tbl\nActionable offers · VIP radar\nTheo by tier · historical analytics", 12, MUTED)
+    ax.plot([859, 1211], [897, 897], color=BORDER, lw=1)
+    label(859, 920, "risingwave-state", 12, BLUE, "bold")
+    label(859, 956, "Catalog + MVs + chat_messages", 12, MUTED)
 
-# --- RW: HR Similarity MV ---
-box(10.9, 6.9, 2.1, 1.2, C_RW_COMP,
-    "High Roller\nSimilarity MV\n\nweighted score\n(incl. theo_win 20%)", 8)
-arrow(10.6, 7.5, 10.9, 7.5, "", C_RW_COMP)
+    badge(1315, 235, "04  DECISIONS & EXECUTION", TEAL)
+    box(1315, 272, 380, 295, TEAL)
+    label(1337, 295, "Operations service", 19, TEXT, "bold")
+    label(1337, 340, "Constrained scenario engine\nPlan checks & automatic replanning\nApproval, dispatch & observations", 12, MUTED)
+    ax.plot([1337, 1673], [450, 450], color=BORDER, lw=1)
+    label(1337, 466, "SQLite WAL · operations-state", 12, TEAL, "bold")
+    label(1337, 501, "Plans, tasks, commands & evidence", 11, MUTED)
 
-# --- RW: mv_player_features (combined) ---
-box(6.3, 5.4, 6.7, 0.8, C_RW_COMP,
-    "mv_player_features — unified feature store\n(gaming × F&B × hotel × theo × house_edge)",
-    8, bold=True)
-arrow(7.25, 6.9, 7.25, 6.2, "", C_RW_COMP)
-arrow(9.55, 6.9, 9.55, 6.2, "", C_RW_COMP)
-arrow(11.95, 6.9, 11.95, 6.2, "", C_RW_COMP)
+    badge(1775, 235, "05  MANAGER WORKSPACE", TEAL)
+    box(1775, 272, 365, 295, TEAL)
+    label(1797, 295, "Streamlit · :8501", 19, TEXT, "bold")
+    label(1797, 340, "Live / +15 / +30 minute floor\nGoal + constraint review\nAction center · evidence\nEnglish guided product tour", 12, MUTED)
+    label(1797, 508, "Independent 3-second refresh", 11, TEAL, "bold")
 
-# --- RW: Recommendations Table ---
-box(6.3, 3.9, 2.5, 1.0, C_RW_COMP,
-    "recommendations_tbl\n(ML predictions)", 8)
+    for start, end in [(385, 465), (755, 835), (1235, 1315), (1695, 1775)]:
+        line([(start, 399), (end, 399)])
+    label(425, 422, "events", 10, BLUE, ha="center")
+    label(795, 422, "ingest", 10, BLUE, ha="center")
+    label(1275, 422, "1s poll", 10, BLUE, ha="center")
+    label(1735, 422, "HTTP", 10, BLUE, ha="center")
 
-# --- RW: Actionable Recommendations MV ---
-box(9.1, 3.9, 3.9, 1.2, C_RW_COMP,
-    "Actionable Recommendations MV\n\nbusiness rules + offer_value\n(% of cumulative theo_win)",
-    8, bold=True)
-arrow(8.8, 4.4, 9.1, 4.4, "JOIN", C_RW_COMP)
-arrow(11.0, 5.4, 11.0, 5.1, "", C_RW_COMP)
+    # UI request path (no automatic approval).
+    line([(2140, 320), (2170, 320), (2170, 208), (1725, 208), (1725, 320), (1695, 320)], GOLD, True)
+    label(1915, 176, "Goals · review · explicit dispatch", 12, GOLD, ha="center")
 
-# --- RW: Dashboard MVs ---
-box(6.3, 3.0, 6.7, 0.7, C_RW_COMP,
-    "Dashboard MVs: mv_theo_by_tier · mv_high_roller_radar · mv_dashboard_stats", 8)
-arrow(7.25, 5.4, 7.25, 3.7, "", C_RW_COMP)
+    # Simulator pulls reviewed commands from the API. Bridge around RW to avoid
+    # implying that this return route passes through streaming SQL or Kafka.
+    command_route = [(1370, 567), (1370, 659), (1254, 659),
+                     (1254, 1090), (355, 1090), (355, 567)]
+    line(command_route, GOLD, True)
+    label(490, 1057, "Reviewed command delivery · simulator polls /commands every ~1s", 12, GOLD)
+    label(83, 601, "Validate → prepare → apply", 11, TEAL)
+    label(83, 635, "Confirmation returns in the\nnext streamed snapshot.", 11, MUTED)
 
-# === ML Service ===
-ml_rect = FancyBboxPatch((13.8, 5.5), 3.7, 4.5, boxstyle="round,pad=0.2",
-                          facecolor="#F3E8FF", edgecolor=C_ML,
-                          linewidth=2, zorder=1)
-ax.add_patch(ml_rect)
-ax.text(15.65, 9.7, "ML Service (Python)", ha="center", fontsize=10.5,
-        weight="bold", color=C_ML)
+    # Player ML is a separate analytics loop; it does not control operational tasks.
+    badge(465, 724, "RETAINED PLAYER ML", PURPLE)
+    box(465, 763, 290, 269, PURPLE)
+    label(487, 788, "ML inference", 18, TEXT, "bold")
+    label(487, 832, "Next game · churn\nOffer · VIP trajectory\nSynthetic scikit-learn models", 12, MUTED)
+    label(487, 960, "Every 10s · SQL writeback", 11, PURPLE, "bold")
+    line([(835, 681), (795, 681), (795, 817), (755, 817)], PURPLE)
+    label(795, 711, "features", 10, PURPLE, ha="center")
+    line([(755, 923), (788, 923), (788, 860), (835, 860)], PURPLE)
+    label(788, 944, "INSERT", 10, PURPLE, ha="center")
 
-box(14.1, 8.3, 3.1, 0.8, C_ML, "Real-time Features\n(query RW MVs)", 8)
-box(14.1, 7.0, 3.1, 1.0, C_ML,
-    "scikit-learn Models\n\nnext-game | churn\noffer | HR trajectory", 8)
-box(14.1, 5.7, 3.1, 0.8, C_ML, "Predictions\n(every 10s)", 8)
+    # The same model-provider category has two distinct callers and permissions.
+    badge(1315, 724, "OPTIONAL MODEL PROVIDERS", PURPLE)
+    box(1315, 763, 380, 269, PURPLE)
+    label(1337, 788, "External LLM", 18, TEXT, "bold")
+    label(1337, 833, "OpenAI · Claude · OpenRouter\nOps: goal → typed constraints\nChat: question → read-only SQL\nNo forecast math / action execution", 12, MUTED)
+    label(1337, 958, "Templates + manual form without a key", 10.5, PURPLE)
+    line([(1600, 567), (1600, 763)], PURPLE, True)
+    line([(1625, 763), (1625, 567)], PURPLE, True)
+    label(1565, 595, "Goal + constraints", 10, PURPLE, ha="right")
+    label(1565, 628, "Validated JSON response", 10, PURPLE, ha="right")
 
-arrow(15.65, 8.3, 15.65, 8.0, "")
-arrow(15.65, 7.0, 15.65, 6.5, "Predict")
+    badge(1775, 724, "PLAYER ANALYTICS PAGE", BLUE)
+    box(1775, 763, 365, 269, BLUE)
+    label(1797, 788, "Analytics & SQL chat", 18, TEXT, "bold")
+    label(1797, 833, "VIP radar · Theo · stored offers\nDirect RisingWave queries\nSeparate read-only SQL agent\nSQL-backed chat memory", 12, MUTED)
+    label(1797, 986, "Historical players ≠ live seated count", 10.5, BLUE)
+    line([(1958, 567), (1958, 763)], MUTED, True)
+    label(1981, 651, "Page navigation", 10, MUTED)
+    line([(1775, 898), (1695, 898)], PURPLE, True)
+    line([(1695, 925), (1775, 925)], PURPLE, True)
+    label(1735, 950, "SQL chat", 10, PURPLE, ha="center")
 
-# RW -> ML (features out)
-arrow(13.0, 7.5, 14.1, 8.5, "Query features", C_ML)
+    # Direct SQL connection from the analytics page to RW, routed below the other
+    # components. The generated SQL agent's SELECT boundary is distinct from the
+    # application's writes for chat memory.
+    line([(2030, 1032), (2030, 1150), (1145, 1150), (1145, 1032)], BLUE)
+    label(1545, 1117, "Analytics SELECT queries · application-managed chat memory", 12, BLUE, ha="center")
 
-# ML -> RW (predictions back via SQL INSERT)
-arrow(14.1, 5.9, 8.8, 4.4, "INSERT predictions\n(direct SQL)", C_ML)
+    box(60, 1215, 2080, 174, BORDER, "#101d2e")
+    label(86, 1239, "EXECUTION CONTRACT", 11, TEAL, "bold")
+    label(86, 1273, "PENDING  →  ACCEPTED  →  EXECUTING  →  OBSERVING  →  CLOSED", 17, TEXT, "bold")
+    label(86, 1320, "Freshness + version + staff + conflict checks  ·  Unique command IDs  ·  +5 / +15 minute observations", 12, MUTED)
+    label(86, 1353, "One action per scenario. Forecasts use demo assumptions; observed changes are not causal revenue lift.", 11, MUTED)
 
-# === Dashboard ===
-box(7.5, 0.9, 3.5, 0.9, C_DASH, "Streamlit Dashboard\nlocalhost:8501", 10, bold=True)
-arrow(9.25, 3.0, 9.25, 1.8, "Query MVs", C_DASH)
+    # Small, consistent legend; use labels as well as colors.
+    line([(65, 1425), (112, 1425)], BLUE)
+    label(125, 1415, "Stream / SQL / state", 10, MUTED)
+    line([(435, 1425), (482, 1425)], GOLD, True)
+    label(495, 1415, "Reviewed requests / commands", 10, MUTED)
+    line([(865, 1425), (912, 1425)], PURPLE, True)
+    label(925, 1415, "Optional LLM request / response", 10, MUTED)
+    label(2140, 1415, "Local simulation · implemented 2.0", 10, MUTED, ha="right")
 
-# KPI caption under the dashboard
-ax.text(9.25, 0.45,
-        "Live KPIs: Active Players · Avg Bet · Total Wagered · Theo Win (window) · Effective House Edge",
-        ha="center", fontsize=7.5, color=C_DASH, style="italic")
+    fig.savefig(ROOT / "architecture.png", dpi=150, facecolor=BG)
+    fig.savefig(ROOT / "architecture.svg", facecolor=BG,
+                metadata={"Title": "Smart Casino Floor 2.0 architecture",
+                          "Description": "Operational observations through Kafka and RisingWave, manager-reviewed command delivery, separate player analytics, and optional LLM providers."})
+    svg = ROOT / "architecture.svg"
+    svg.write_text("\n".join(line.rstrip() for line in svg.read_text().splitlines()) + "\n")
+    plt.close(fig)
+    print("Generated architecture.png and architecture.svg")
 
-# === LLM Chat Agent ===
-agent_rect = FancyBboxPatch((13.8, 0.6), 5.8, 4.6, boxstyle="round,pad=0.2",
-                             facecolor="#FDF4FF", edgecolor=C_AGENT,
-                             linewidth=2, zorder=1)
-ax.add_patch(agent_rect)
-ax.text(16.7, 4.95, "LLM Chat Agent", ha="center", fontsize=10.5,
-        weight="bold", color=C_AGENT)
-ax.text(16.7, 4.55, "(sidebar of the dashboard)", ha="center", fontsize=8,
-        style="italic", color=C_AGENT)
 
-box(14.1, 3.4, 5.2, 0.9, C_AGENT,
-    "Pluggable providers:\nClaude · OpenAI · OpenRouter · Azure", 8)
-box(14.1, 2.3, 5.2, 0.9, C_AGENT,
-    "NL → SQL (schema-aware system prompt)\n→ execute on RW → summarize", 8)
-box(14.1, 1.2, 5.2, 0.9, C_AGENT,
-    "Custom base_url support\n(proxy / gateway compatible)", 8)
-
-# Dashboard <-> Agent
-arrow(11.0, 1.35, 13.8, 1.65, "embeds", C_AGENT)
-# Agent queries the same RW MVs
-arrow(14.1, 2.75, 13.0, 3.35, "SELECT", C_AGENT)
-
-# === House Advantage reference (bottom-left panel) ===
-ax.text(0.4, 5.4, "House Advantage (house edge):", fontsize=9,
-        weight="bold", color=C_TEXT)
-edges = [("Slots", "7.50%"), ("Roulette", "5.26%"),
-         ("Blackjack", "0.75%"), ("Poker", "2.50%")]
-for i, (game, pct) in enumerate(edges):
-    ax.text(0.4, 4.95 - i * 0.35, f"  • {game}: {pct}",
-            fontsize=8, color=C_TEXT)
-
-# Theo Win formula call-out
-ax.text(0.4, 3.3, "Theo Win formula", fontsize=9, weight="bold", color=C_RW_NEW)
-ax.text(0.4, 2.85,
-        r"theo_win = $\Sigma$ ( bet × house_edge )",
-        fontsize=8.5, color=C_RW_NEW, family="serif")
-ax.text(0.4, 2.55, "Casino's expected profit, regardless",
-        fontsize=7.5, color=C_RW_NEW, style="italic")
-ax.text(0.4, 2.30, "of short-term luck — the industry-",
-        fontsize=7.5, color=C_RW_NEW, style="italic")
-ax.text(0.4, 2.05, "standard player-value metric.",
-        fontsize=7.5, color=C_RW_NEW, style="italic")
-
-# === Legend ===
-ax.text(0.4, 1.5, "Components:", fontsize=9, weight="bold", color=C_TEXT)
-legend_items = [
-    (C_PROD,    "Event producer"),
-    (C_KAFKA,   "Message broker"),
-    (C_RW_COMP, "RisingWave MV"),
-    (C_RW_NEW,  "Theo Win / house-edge"),
-    (C_ML,      "ML inference"),
-    (C_DASH,    "Dashboard"),
-    (C_AGENT,   "LLM chat agent"),
-]
-for i, (color, label) in enumerate(legend_items):
-    y = 1.15 - i * 0.3
-    b = FancyBboxPatch((0.4, y - 0.09), 0.35, 0.22, boxstyle="round,pad=0.04",
-                       facecolor=color, edgecolor="none", zorder=3)
-    ax.add_patch(b)
-    ax.text(0.9, y + 0.02, label, fontsize=7.5, va="center", color=C_TEXT)
-
-plt.tight_layout()
-plt.savefig("/Users/ronxing/Documents/local/demo/smart-casino-floor/architecture.png",
-            dpi=150, bbox_inches="tight", facecolor="white")
-print("Saved to architecture.png")
+if __name__ == "__main__":
+    render()

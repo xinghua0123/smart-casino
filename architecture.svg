@@ -1,0 +1,598 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1584pt" height="1051.2pt" viewBox="0 0 1584 1051.2" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <title>Smart Casino Floor 2.0 architecture</title>
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:title>Smart Casino Floor 2.0 architecture</dc:title>
+    <dc:date>2026-09-06T12:00:31.781122</dc:date>
+    <dc:description>Operational observations through Kafka and RisingWave, manager-reviewed command delivery, separate player analytics, and optional LLM providers.</dc:description>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.9.4, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 1051.2
+L 1584 1051.2
+L 1584 0
+L 0 0
+z
+" style="fill: #0c1423"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 54.72 195.84
+L 265.68 195.84
+Q 277.2 195.84 277.2 207.36
+L 277.2 396.72
+Q 277.2 408.24 265.68 408.24
+L 54.72 408.24
+Q 43.2 408.24 43.2 396.72
+L 43.2 207.36
+Q 43.2 195.84 54.72 195.84
+z
+" clip-path="url(#p72dae500f6)" style="fill: #142236; stroke: #6dd9c0; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_1">
+    <path d="M 59.04 324
+L 261.36 324
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #30445f; stroke-linecap: square"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 346.32 195.84
+L 532.08 195.84
+Q 543.6 195.84 543.6 207.36
+L 543.6 396.72
+Q 543.6 408.24 532.08 408.24
+L 346.32 408.24
+Q 334.8 408.24 334.8 396.72
+L 334.8 207.36
+Q 334.8 195.84 346.32 195.84
+z
+" clip-path="url(#p72dae500f6)" style="fill: #142236; stroke: #30445f; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 612.72 195.84
+L 877.68 195.84
+Q 889.2 195.84 889.2 207.36
+L 889.2 731.52
+Q 889.2 743.04 877.68 743.04
+L 612.72 743.04
+Q 601.2 743.04 601.2 731.52
+L 601.2 207.36
+Q 601.2 195.84 612.72 195.84
+z
+" clip-path="url(#p72dae500f6)" style="fill: #112439; stroke: #82b9f7; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 625.68 252.72
+L 864.72 252.72
+Q 871.92 252.72 871.92 259.92
+L 871.92 382.32
+Q 871.92 389.52 864.72 389.52
+L 625.68 389.52
+Q 618.48 389.52 618.48 382.32
+L 618.48 259.92
+Q 618.48 252.72 625.68 252.72
+z
+" clip-path="url(#p72dae500f6)" style="fill: #172f49; stroke: #30445f; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_2">
+    <path d="M 618.48 507.6
+L 871.92 507.6
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #30445f; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_3">
+    <path d="M 618.48 645.84
+L 871.92 645.84
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #30445f; stroke-linecap: square"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 958.32 195.84
+L 1208.88 195.84
+Q 1220.4 195.84 1220.4 207.36
+L 1220.4 396.72
+Q 1220.4 408.24 1208.88 408.24
+L 958.32 408.24
+Q 946.8 408.24 946.8 396.72
+L 946.8 207.36
+Q 946.8 195.84 958.32 195.84
+z
+" clip-path="url(#p72dae500f6)" style="fill: #142236; stroke: #6dd9c0; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_4">
+    <path d="M 962.64 324
+L 1204.56 324
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #30445f; stroke-linecap: square"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 1289.52 195.84
+L 1529.28 195.84
+Q 1540.8 195.84 1540.8 207.36
+L 1540.8 396.72
+Q 1540.8 408.24 1529.28 408.24
+L 1289.52 408.24
+Q 1278 408.24 1278 396.72
+L 1278 207.36
+Q 1278 195.84 1289.52 195.84
+z
+" clip-path="url(#p72dae500f6)" style="fill: #142236; stroke: #6dd9c0; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 346.32 549.36
+L 532.08 549.36
+Q 543.6 549.36 543.6 560.88
+L 543.6 731.52
+Q 543.6 743.04 532.08 743.04
+L 346.32 743.04
+Q 334.8 743.04 334.8 731.52
+L 334.8 560.88
+Q 334.8 549.36 346.32 549.36
+z
+" clip-path="url(#p72dae500f6)" style="fill: #142236; stroke: #c4a0ef; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 958.32 549.36
+L 1208.88 549.36
+Q 1220.4 549.36 1220.4 560.88
+L 1220.4 731.52
+Q 1220.4 743.04 1208.88 743.04
+L 958.32 743.04
+Q 946.8 743.04 946.8 731.52
+L 946.8 560.88
+Q 946.8 549.36 958.32 549.36
+z
+" clip-path="url(#p72dae500f6)" style="fill: #142236; stroke: #c4a0ef; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 1289.52 549.36
+L 1529.28 549.36
+Q 1540.8 549.36 1540.8 560.88
+L 1540.8 731.52
+Q 1540.8 743.04 1529.28 743.04
+L 1289.52 743.04
+Q 1278 743.04 1278 731.52
+L 1278 560.88
+Q 1278 549.36 1289.52 549.36
+z
+" clip-path="url(#p72dae500f6)" style="fill: #142236; stroke: #82b9f7; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 54.72 874.8
+L 1529.28 874.8
+Q 1540.8 874.8 1540.8 886.32
+L 1540.8 988.56
+Q 1540.8 1000.08 1529.28 1000.08
+L 54.72 1000.08
+Q 43.2 1000.08 43.2 988.56
+L 43.2 886.32
+Q 43.2 874.8 54.72 874.8
+z
+" clip-path="url(#p72dae500f6)" style="fill: #101d2e; stroke: #30445f; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 277.2 287.28
+L 332.899342 287.28
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 326.899342 284.28
+L 332.899342 287.28
+L 326.899342 290.28
+z
+" clip-path="url(#p72dae500f6)" style="fill: #82b9f7; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 543.6 287.28
+L 599.299342 287.28
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 593.299342 284.28
+L 599.299342 287.28
+L 593.299342 290.28
+z
+" clip-path="url(#p72dae500f6)" style="fill: #82b9f7; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 889.2 287.28
+L 944.899342 287.28
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 938.899342 284.28
+L 944.899342 287.28
+L 938.899342 290.28
+z
+" clip-path="url(#p72dae500f6)" style="fill: #82b9f7; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_15">
+    <path d="M 1220.4 287.28
+L 1276.099342 287.28
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 1270.099342 284.28
+L 1276.099342 287.28
+L 1270.099342 290.28
+z
+" clip-path="url(#p72dae500f6)" style="fill: #82b9f7; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_16">
+    <path d="M 1540.8 230.4
+L 1562.4 230.4
+L 1562.4 149.76
+L 1242 149.76
+L 1242 230.4
+L 1222.300658 230.4
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #f2bf6b; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 1228.300658 233.4
+L 1222.300658 230.4
+L 1228.300658 227.4
+z
+" clip-path="url(#p72dae500f6)" style="fill: #f2bf6b; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #f2bf6b; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_17">
+    <path d="M 986.4 408.24
+L 986.4 474.48
+L 902.88 474.48
+L 902.88 784.8
+L 255.6 784.8
+L 255.6 410.140658
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #f2bf6b; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 252.6 416.140658
+L 255.6 410.140658
+L 258.6 416.140658
+z
+" clip-path="url(#p72dae500f6)" style="fill: #f2bf6b; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #f2bf6b; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_18">
+    <path d="M 601.2 490.32
+L 572.4 490.32
+L 572.4 588.24
+L 545.500658 588.24
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 551.500658 591.24
+L 545.500658 588.24
+L 551.500658 585.24
+z
+" clip-path="url(#p72dae500f6)" style="fill: #c4a0ef; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_19">
+    <path d="M 543.6 664.56
+L 567.36 664.56
+L 567.36 619.2
+L 599.299342 619.2
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 593.299342 616.2
+L 599.299342 619.2
+L 593.299342 622.2
+z
+" clip-path="url(#p72dae500f6)" style="fill: #c4a0ef; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_20">
+    <path d="M 1152 408.24
+L 1152 547.459342
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 1155 541.459342
+L 1152 547.459342
+L 1149 541.459342
+z
+" clip-path="url(#p72dae500f6)" style="fill: #c4a0ef; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_21">
+    <path d="M 1170 549.36
+L 1170 410.140658
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 1167 416.140658
+L 1170 410.140658
+L 1173 416.140658
+z
+" clip-path="url(#p72dae500f6)" style="fill: #c4a0ef; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_22">
+    <path d="M 1409.76 408.24
+L 1409.76 547.459342
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #a9bad0; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 1412.76 541.459342
+L 1409.76 547.459342
+L 1406.76 541.459342
+z
+" clip-path="url(#p72dae500f6)" style="fill: #a9bad0; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #a9bad0; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_23">
+    <path d="M 1278 646.56
+L 1222.300658 646.56
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 1228.300658 649.56
+L 1222.300658 646.56
+L 1228.300658 643.56
+z
+" clip-path="url(#p72dae500f6)" style="fill: #c4a0ef; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_24">
+    <path d="M 1220.4 666
+L 1276.099342 666
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 1270.099342 663
+L 1276.099342 666
+L 1270.099342 669
+z
+" clip-path="url(#p72dae500f6)" style="fill: #c4a0ef; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_25">
+    <path d="M 1461.6 743.04
+L 1461.6 828
+L 824.4 828
+L 824.4 744.940658
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 821.4 750.940658
+L 824.4 744.940658
+L 827.4 750.940658
+z
+" clip-path="url(#p72dae500f6)" style="fill: #82b9f7; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_26">
+    <path d="M 46.8 1026
+L 78.739342 1026
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 72.739342 1023
+L 78.739342 1026
+L 72.739342 1029
+z
+" clip-path="url(#p72dae500f6)" style="fill: #82b9f7; stroke: #82b9f7; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_27">
+    <path d="M 313.2 1026
+L 345.139342 1026
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #f2bf6b; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 339.139342 1023
+L 345.139342 1026
+L 339.139342 1029
+z
+" clip-path="url(#p72dae500f6)" style="fill: #f2bf6b; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #f2bf6b; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_28">
+    <path d="M 622.8 1026
+L 654.739342 1026
+" clip-path="url(#p72dae500f6)" style="fill: none; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 648.739342 1023
+L 654.739342 1026
+L 648.739342 1029
+z
+" clip-path="url(#p72dae500f6)" style="fill: #c4a0ef; stroke-dasharray: 8.5,6.8; stroke-dashoffset: 0; stroke: #c4a0ef; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="text_1">
+    <text style="fill: #6dd9c0; font: 700 12px 'DejaVu Sans'; text-anchor: start" x="43.2" y="42.238125" transform="rotate(-0 43.2 42.238125)">SMART CASINO FLOOR / 2.0</text>
+   </g>
+   <g id="text_2">
+    <text style="fill: #e8f0fa; font: 700 30px 'DejaVu Sans'; text-anchor: start" x="43.2" y="86.155313" transform="rotate(-0 43.2 86.155313)">Observe. Compare. Approve. Measure.</text>
+   </g>
+   <g id="text_3">
+    <text style="fill: #a9bad0; font: 15px 'DejaVu Sans'; text-anchor: start" x="43.2" y="121.557656" transform="rotate(-0 43.2 121.557656)">Implemented demo architecture · Streaming observations and manager-reviewed actions</text>
+   </g>
+   <g id="text_4">
+    <text style="fill: #6dd9c0; font: 700 10px 'DejaVu Sans'; text-anchor: start" x="43.2" y="176.798438" transform="rotate(-0 43.2 176.798438)">01  PHYSICAL STATE</text>
+   </g>
+   <g id="text_5">
+    <text style="fill: #e8f0fa; font: 700 19px 'DejaVu Sans'; text-anchor: start" x="59.04" y="226.837031" transform="rotate(-0 59.04 226.837031)">Floor simulator</text>
+   </g>
+   <g id="text_6">
+    <text style="fill: #a9bad0; font: 13px 'DejaVu Sans'" transform="translate(59.04 254.677969)">36 positions · seats &amp; queues</text>
+    <text style="fill: #a9bad0; font: 13px 'DejaVu Sans'" transform="translate(59.04 272.198516)">Tables, minimums &amp; dealers</text>
+    <text style="fill: #a9bad0; font: 13px 'DejaVu Sans'" transform="translate(59.04 289.719063)">10× clock · physical receipts</text>
+   </g>
+   <g id="text_7">
+    <text style="fill: #6dd9c0; font: 700 12px 'DejaVu Sans'; text-anchor: start" x="59.04" y="344.638125" transform="rotate(-0 59.04 344.638125)">Durable floor state</text>
+   </g>
+   <g id="text_8">
+    <text style="fill: #a9bad0; font: 11px 'DejaVu Sans'; text-anchor: start" x="59.04" y="367.638281" transform="rotate(-0 59.04 367.638281)">simulator-state / floor.json</text>
+   </g>
+   <g id="text_9">
+    <text style="fill: #82b9f7; font: 700 10px 'DejaVu Sans'; text-anchor: start" x="334.8" y="176.798438" transform="rotate(-0 334.8 176.798438)">02  EVENT TRANSPORT</text>
+   </g>
+   <g id="text_10">
+    <text style="fill: #e8f0fa; font: 700 19px 'DejaVu Sans'; text-anchor: start" x="350.64" y="226.837031" transform="rotate(-0 350.64 226.837031)">Apache Kafka</text>
+   </g>
+   <g id="text_11">
+    <text style="fill: #a9bad0; font: 13px 'DejaVu Sans'" transform="translate(350.64 257.557969)">operational_events</text>
+    <text style="fill: #a9bad0; font: 13px 'DejaVu Sans'" transform="translate(350.64 275.440078)">gaming_events</text>
+    <text style="fill: #a9bad0; font: 13px 'DejaVu Sans'" transform="translate(350.64 293.322188)">fnb_events</text>
+    <text style="fill: #a9bad0; font: 13px 'DejaVu Sans'" transform="translate(350.64 311.204297)">hotel_events</text>
+   </g>
+   <g id="text_12">
+    <text style="fill: #82b9f7; font: 700 12px 'DejaVu Sans'; text-anchor: start" x="350.64" y="371.278125" transform="rotate(-0 350.64 371.278125)">4 active input streams</text>
+   </g>
+   <g id="text_13">
+    <text style="fill: #82b9f7; font: 700 10px 'DejaVu Sans'; text-anchor: start" x="601.2" y="176.798438" transform="rotate(-0 601.2 176.798438)">03  STREAMING SQL</text>
+   </g>
+   <g id="text_14">
+    <text style="fill: #e8f0fa; font: 700 21px 'DejaVu Sans'; text-anchor: start" x="618.48" y="228.356719" transform="rotate(-0 618.48 228.356719)">RisingWave</text>
+   </g>
+   <g id="text_15">
+    <text style="fill: #82b9f7; font: 700 15px 'DejaVu Sans'; text-anchor: start" x="633.6" y="279.237656" transform="rotate(-0 633.6 279.237656)">Operational state MVs</text>
+   </g>
+   <g id="text_16">
+    <text style="fill: #e8f0fa; font: 12px 'DejaVu Sans'" transform="translate(633.6 307.198125)">mv_ops_latest_snapshot</text>
+    <text style="fill: #e8f0fa; font: 12px 'DejaVu Sans'" transform="translate(633.6 323.704688)">mv_ops_table_state</text>
+    <text style="fill: #e8f0fa; font: 12px 'DejaVu Sans'" transform="translate(633.6 340.21125)">mv_ops_pit_state</text>
+   </g>
+   <g id="text_17">
+    <text style="fill: #e8f0fa; font: 700 16px 'DejaVu Sans'; text-anchor: start" x="618.48" y="422.5575" transform="rotate(-0 618.48 422.5575)">Player feature MVs</text>
+   </g>
+   <g id="text_18">
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(618.48 451.918125)">5-minute windows · cumulative Theo</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(618.48 468.090938)">Latest feature row per player</text>
+   </g>
+   <g id="text_19">
+    <text style="fill: #e8f0fa; font: 700 16px 'DejaVu Sans'; text-anchor: start" x="618.48" y="542.0775" transform="rotate(-0 618.48 542.0775)">Prediction + rule views</text>
+   </g>
+   <g id="text_20">
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(618.48 570.718125)">recommendations_tbl</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(618.48 587.224688)">Actionable offers · VIP radar</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(618.48 603.3975)">Theo by tier · historical analytics</text>
+   </g>
+   <g id="text_21">
+    <text style="fill: #82b9f7; font: 700 12px 'DejaVu Sans'; text-anchor: start" x="618.48" y="671.518125" transform="rotate(-0 618.48 671.518125)">risingwave-state</text>
+   </g>
+   <g id="text_22">
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'; text-anchor: start" x="618.48" y="697.438125" transform="rotate(-0 618.48 697.438125)">Catalog + MVs + chat_messages</text>
+   </g>
+   <g id="text_23">
+    <text style="fill: #6dd9c0; font: 700 10px 'DejaVu Sans'; text-anchor: start" x="946.8" y="176.798438" transform="rotate(-0 946.8 176.798438)">04  DECISIONS &amp; EXECUTION</text>
+   </g>
+   <g id="text_24">
+    <text style="fill: #e8f0fa; font: 700 19px 'DejaVu Sans'; text-anchor: start" x="962.64" y="226.837031" transform="rotate(-0 962.64 226.837031)">Operations service</text>
+   </g>
+   <g id="text_25">
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(962.64 253.918125)">Constrained scenario engine</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(962.64 270.090938)">Plan checks &amp; automatic replanning</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(962.64 286.26375)">Approval, dispatch &amp; observations</text>
+   </g>
+   <g id="text_26">
+    <text style="fill: #6dd9c0; font: 700 12px 'DejaVu Sans'; text-anchor: start" x="962.64" y="344.638125" transform="rotate(-0 962.64 344.638125)">SQLite WAL · operations-state</text>
+   </g>
+   <g id="text_27">
+    <text style="fill: #a9bad0; font: 11px 'DejaVu Sans'; text-anchor: start" x="962.64" y="369.078281" transform="rotate(-0 962.64 369.078281)">Plans, tasks, commands &amp; evidence</text>
+   </g>
+   <g id="text_28">
+    <text style="fill: #6dd9c0; font: 700 10px 'DejaVu Sans'; text-anchor: start" x="1278" y="176.798438" transform="rotate(-0 1278 176.798438)">05  MANAGER WORKSPACE</text>
+   </g>
+   <g id="text_29">
+    <text style="fill: #e8f0fa; font: 700 19px 'DejaVu Sans'; text-anchor: start" x="1293.84" y="226.837031" transform="rotate(-0 1293.84 226.837031)">Streamlit · :8501</text>
+   </g>
+   <g id="text_30">
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(1293.84 253.918125)">Live / +15 / +30 minute floor</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(1293.84 270.090938)">Goal + constraint review</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(1293.84 286.26375)">Action center · evidence</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(1293.84 302.436563)">English guided product tour</text>
+   </g>
+   <g id="text_31">
+    <text style="fill: #6dd9c0; font: 700 11px 'DejaVu Sans'; text-anchor: start" x="1293.84" y="374.118281" transform="rotate(-0 1293.84 374.118281)">Independent 3-second refresh</text>
+   </g>
+   <g id="text_32">
+    <text style="fill: #82b9f7; font: 10px 'DejaVu Sans'; text-anchor: middle" x="306" y="311.438438" transform="rotate(-0 306 311.438438)">events</text>
+   </g>
+   <g id="text_33">
+    <text style="fill: #82b9f7; font: 10px 'DejaVu Sans'; text-anchor: middle" x="572.4" y="311.438438" transform="rotate(-0 572.4 311.438438)">ingest</text>
+   </g>
+   <g id="text_34">
+    <text style="fill: #82b9f7; font: 10px 'DejaVu Sans'; text-anchor: middle" x="918" y="311.438438" transform="rotate(-0 918 311.438438)">1s poll</text>
+   </g>
+   <g id="text_35">
+    <text style="fill: #82b9f7; font: 10px 'DejaVu Sans'; text-anchor: middle" x="1249.2" y="311.438438" transform="rotate(-0 1249.2 311.438438)">HTTP</text>
+   </g>
+   <g id="text_36">
+    <text style="fill: #f2bf6b; font: 12px 'DejaVu Sans'; text-anchor: middle" x="1378.8" y="135.838125" transform="rotate(-0 1378.8 135.838125)">Goals · review · explicit dispatch</text>
+   </g>
+   <g id="text_37">
+    <text style="fill: #f2bf6b; font: 12px 'DejaVu Sans'; text-anchor: start" x="352.8" y="770.158125" transform="rotate(-0 352.8 770.158125)">Reviewed command delivery · simulator polls /commands every ~1s</text>
+   </g>
+   <g id="text_38">
+    <text style="fill: #6dd9c0; font: 11px 'DejaVu Sans'; text-anchor: start" x="59.76" y="441.078281" transform="rotate(-0 59.76 441.078281)">Validate → prepare → apply</text>
+   </g>
+   <g id="text_39">
+    <text style="fill: #a9bad0; font: 11px 'DejaVu Sans'" transform="translate(59.76 465.558281)">Confirmation returns in the</text>
+    <text style="fill: #a9bad0; font: 11px 'DejaVu Sans'" transform="translate(59.76 480.383359)">next streamed snapshot.</text>
+   </g>
+   <g id="text_40">
+    <text style="fill: #c4a0ef; font: 700 10px 'DejaVu Sans'; text-anchor: start" x="334.8" y="528.878438" transform="rotate(-0 334.8 528.878438)">RETAINED PLAYER ML</text>
+   </g>
+   <g id="text_41">
+    <text style="fill: #e8f0fa; font: 700 18px 'DejaVu Sans'; text-anchor: start" x="350.64" y="581.037188" transform="rotate(-0 350.64 581.037188)">ML inference</text>
+   </g>
+   <g id="text_42">
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(350.64 608.158125)">Next game · churn</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(350.64 624.330938)">Offer · VIP trajectory</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(350.64 640.50375)">Synthetic scikit-learn models</text>
+   </g>
+   <g id="text_43">
+    <text style="fill: #c4a0ef; font: 700 11px 'DejaVu Sans'; text-anchor: start" x="350.64" y="699.558281" transform="rotate(-0 350.64 699.558281)">Every 10s · SQL writeback</text>
+   </g>
+   <g id="text_44">
+    <text style="fill: #c4a0ef; font: 10px 'DejaVu Sans'; text-anchor: middle" x="572.4" y="519.518438" transform="rotate(-0 572.4 519.518438)">features</text>
+   </g>
+   <g id="text_45">
+    <text style="fill: #c4a0ef; font: 10px 'DejaVu Sans'; text-anchor: middle" x="567.36" y="687.278438" transform="rotate(-0 567.36 687.278438)">INSERT</text>
+   </g>
+   <g id="text_46">
+    <text style="fill: #c4a0ef; font: 700 10px 'DejaVu Sans'; text-anchor: start" x="946.8" y="528.878438" transform="rotate(-0 946.8 528.878438)">OPTIONAL MODEL PROVIDERS</text>
+   </g>
+   <g id="text_47">
+    <text style="fill: #e8f0fa; font: 700 18px 'DejaVu Sans'; text-anchor: start" x="962.64" y="581.037188" transform="rotate(-0 962.64 581.037188)">External LLM</text>
+   </g>
+   <g id="text_48">
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(962.64 608.878125)">OpenAI · Claude · OpenRouter</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(962.64 625.050938)">Ops: goal → typed constraints</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(962.64 641.22375)">Chat: question → read-only SQL</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(962.64 657.396563)">No forecast math / action execution</text>
+   </g>
+   <g id="text_49">
+    <text style="fill: #c4a0ef; font: 10.5px 'DejaVu Sans'; text-anchor: start" x="962.64" y="697.738359" transform="rotate(-0 962.64 697.738359)">Templates + manual form without a key</text>
+   </g>
+   <g id="text_50">
+    <text style="fill: #c4a0ef; font: 10px 'DejaVu Sans'; text-anchor: end" x="1126.8" y="435.998438" transform="rotate(-0 1126.8 435.998438)">Goal + constraints</text>
+   </g>
+   <g id="text_51">
+    <text style="fill: #c4a0ef; font: 10px 'DejaVu Sans'; text-anchor: end" x="1126.8" y="459.758438" transform="rotate(-0 1126.8 459.758438)">Validated JSON response</text>
+   </g>
+   <g id="text_52">
+    <text style="fill: #82b9f7; font: 700 10px 'DejaVu Sans'; text-anchor: start" x="1278" y="528.878438" transform="rotate(-0 1278 528.878438)">PLAYER ANALYTICS PAGE</text>
+   </g>
+   <g id="text_53">
+    <text style="fill: #e8f0fa; font: 700 18px 'DejaVu Sans'; text-anchor: start" x="1293.84" y="581.037188" transform="rotate(-0 1293.84 581.037188)">Analytics &amp; SQL chat</text>
+   </g>
+   <g id="text_54">
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(1293.84 608.878125)">VIP radar · Theo · stored offers</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(1293.84 625.050938)">Direct RisingWave queries</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(1293.84 641.22375)">Separate read-only SQL agent</text>
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'" transform="translate(1293.84 657.396563)">SQL-backed chat memory</text>
+   </g>
+   <g id="text_55">
+    <text style="fill: #82b9f7; font: 10.5px 'DejaVu Sans'; text-anchor: start" x="1293.84" y="717.898359" transform="rotate(-0 1293.84 717.898359)">Historical players ≠ live seated count</text>
+   </g>
+   <g id="text_56">
+    <text style="fill: #a9bad0; font: 10px 'DejaVu Sans'; text-anchor: start" x="1426.32" y="476.318438" transform="rotate(-0 1426.32 476.318438)">Page navigation</text>
+   </g>
+   <g id="text_57">
+    <text style="fill: #c4a0ef; font: 10px 'DejaVu Sans'; text-anchor: middle" x="1249.2" y="691.598438" transform="rotate(-0 1249.2 691.598438)">SQL chat</text>
+   </g>
+   <g id="text_58">
+    <text style="fill: #82b9f7; font: 12px 'DejaVu Sans'; text-anchor: middle" x="1112.4" y="813.358125" transform="rotate(-0 1112.4 813.358125)">Analytics SELECT queries · application-managed chat memory</text>
+   </g>
+   <g id="text_59">
+    <text style="fill: #6dd9c0; font: 700 11px 'DejaVu Sans'; text-anchor: start" x="61.92" y="900.438281" transform="rotate(-0 61.92 900.438281)">EXECUTION CONTRACT</text>
+   </g>
+   <g id="text_60">
+    <text style="fill: #e8f0fa; font: 700 17px 'DejaVu Sans'; text-anchor: start" x="61.92" y="929.477344" transform="rotate(-0 61.92 929.477344)">PENDING  →  ACCEPTED  →  EXECUTING  →  OBSERVING  →  CLOSED</text>
+   </g>
+   <g id="text_61">
+    <text style="fill: #a9bad0; font: 12px 'DejaVu Sans'; text-anchor: start" x="61.92" y="959.518125" transform="rotate(-0 61.92 959.518125)">Freshness + version + staff + conflict checks  ·  Unique command IDs  ·  +5 / +15 minute observations</text>
+   </g>
+   <g id="text_62">
+    <text style="fill: #a9bad0; font: 11px 'DejaVu Sans'; text-anchor: start" x="61.92" y="982.518281" transform="rotate(-0 61.92 982.518281)">One action per scenario. Forecasts use demo assumptions; observed changes are not causal revenue lift.</text>
+   </g>
+   <g id="text_63">
+    <text style="fill: #a9bad0; font: 10px 'DejaVu Sans'; text-anchor: start" x="90" y="1026.398438" transform="rotate(-0 90 1026.398438)">Stream / SQL / state</text>
+   </g>
+   <g id="text_64">
+    <text style="fill: #a9bad0; font: 10px 'DejaVu Sans'; text-anchor: start" x="356.4" y="1026.398438" transform="rotate(-0 356.4 1026.398438)">Reviewed requests / commands</text>
+   </g>
+   <g id="text_65">
+    <text style="fill: #a9bad0; font: 10px 'DejaVu Sans'; text-anchor: start" x="666" y="1026.398438" transform="rotate(-0 666 1026.398438)">Optional LLM request / response</text>
+   </g>
+   <g id="text_66">
+    <text style="fill: #a9bad0; font: 10px 'DejaVu Sans'; text-anchor: end" x="1540.8" y="1026.398438" transform="rotate(-0 1540.8 1026.398438)">Local simulation · implemented 2.0</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p72dae500f6">
+   <rect x="0" y="0" width="1584" height="1051.2"/>
+  </clipPath>
+ </defs>
+</svg>
