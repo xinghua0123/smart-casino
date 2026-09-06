@@ -1,960 +1,321 @@
-"""
-Smart Casino Floor Dashboard — real-time view of ML-powered recommendations,
-high-roller radar, churn alerts, and player activity.
-
-Queries RisingWave materialized views and auto-refreshes every 5 seconds.
-Includes an AI chat agent in the sidebar for natural language data exploration.
-"""
-
+"""Smart Casino Floor · operations workspace. The backend owns every durable action."""
+import html
+import json
 import os
-import time
 import uuid
-
+from pathlib import Path
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
-import psycopg2
 import streamlit as st
+import streamlit.components.v1 as components
 
-from agent import create_agent
-from chat_store import SqlChatStore
-
-RW_HOST = os.environ.get("RISINGWAVE_HOST", "localhost")
-RW_PORT = os.environ.get("RISINGWAVE_PORT", "4566")
-RW_USER = os.environ.get("RISINGWAVE_USER", "root")
-RW_DBNAME = os.environ.get("RISINGWAVE_DBNAME", "dev")
-REFRESH_INTERVAL = 5
-CHAT_STORE_RETRY_INTERVAL = 15
-CHAT_SESSION_PARAM = "chat_session"
-CHAT_STORE = SqlChatStore.from_env(
-    default_host=RW_HOST,
-    default_port=RW_PORT,
-    default_user=RW_USER,
-    default_dbname=RW_DBNAME,
-)
-
-# --- Last month's daily average baseline (hardcoded) ---
-BASELINE = {
-    "avg_bet": 185,
-    "spend_per_min": 210,
-    "wagered_per_5min": 150_000,
-    "theo_per_5min": 7_500,        # ~5% blended house edge × 150K wagered
-    "house_edge": 0.0500,          # 5.00% blended across the typical game mix
-    "win_rate": 0.42,
-    "label": "vs last month avg",
-}
-
-# House edge constants shown in the explanation card (must match 02_feature_mvs.sql)
-HOUSE_EDGES = {
-    "Slots":     0.0750,
-    "Baccarat":  0.0115,
-    "Blackjack": 0.0075,
-}
-
-EXAMPLE_QUESTIONS = [
-    "Who are the top 5 high-roller candidates?",
-    "What's the average churn risk by tier?",
-    "Which game type has the highest average bet?",
-    "How many players need urgent retention?",
-    "Show me emerging archetype players with HR score above 0.6",
-    "What offers are recommended for gold tier players?",
-]
+OPS=os.getenv('OPS_URL','http://localhost:8090')
+PITS={'main':'Main baccarat','entry':'Entry baccarat','vip':'VIP baccarat','blackjack':'Blackjack','slots':'Slots'}
+DEFAULT={'pit':'main','horizon':30,'max_wait':5.0,'extra_staff':0,'protect_vip':True,'excluded':[],'priority':'wait'}
+st.set_page_config(page_title='Floor Operations · Smart Casino',page_icon='♠',layout='wide')
+st.markdown('''<style>
+.stApp{background:#0c1220;color:#e6edf6} [data-testid="stSidebar"]{background:#111c2d}
+.block-container{padding-top:4rem;max-width:1550px} h1,h2,h3{letter-spacing:-.025em}
+[data-testid="stMetric"]{background:#152135;border:1px solid #26374f;padding:16px;border-radius:12px}
+[data-testid="stMetricLabel"]{color:#9daec5} [data-testid="stMetricValue"]{font-size:1.8rem}
+[data-testid="stVerticalBlockBorderWrapper"]>div{border-color:#29394e!important;border-radius:12px}
+.stButton>button{border-radius:8px} .eyebrow{color:#7f9bb8;font-size:12px;letter-spacing:2px}
+.hero{display:flex;justify-content:space-between;align-items:center;margin:0 0 18px}.hero h1{font-size:34px;margin:4px 0}
+.badge{background:#173d36;color:#87e1bd;padding:7px 12px;border-radius:20px;font-size:12px}
+.small{font-size:13px;color:#9daec5}.stTabs [data-baseweb="tab-list"]{gap:20px}
+</style>''',unsafe_allow_html=True)
 
 
-def get_connection():
-    if "rw_conn" not in st.session_state or st.session_state.rw_conn.closed:
-        st.session_state.rw_conn = psycopg2.connect(
-            host=RW_HOST, port=RW_PORT, user=RW_USER, dbname=RW_DBNAME
-        )
-        st.session_state.rw_conn.autocommit = True
-    return st.session_state.rw_conn
-
-
-def get_chat_store_connection():
-    if "chat_store_conn" not in st.session_state or st.session_state.chat_store_conn.closed:
-        st.session_state.chat_store_conn = CHAT_STORE.connect()
-        CHAT_STORE.ensure_schema(st.session_state.chat_store_conn)
-    return st.session_state.chat_store_conn
-
-
-def _drop_chat_store_connection() -> None:
-    conn = st.session_state.pop("chat_store_conn", None)
-    if conn is not None:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-
-def _mark_chat_store_unavailable() -> None:
-    st.session_state.chat_store_unavailable = True
-    st.session_state.chat_store_retry_at = time.monotonic() + CHAT_STORE_RETRY_INTERVAL
-    _drop_chat_store_connection()
-
-
-def _mark_chat_store_available() -> None:
-    st.session_state.chat_store_unavailable = False
-    st.session_state.pop("chat_store_retry_at", None)
-
-
-def _get_query_param(name: str) -> str | None:
-    value = st.query_params.get(name)
-    if isinstance(value, list):
-        return value[0] if value else None
-    return value or None
-
-
-def _set_query_param(name: str, value: str) -> None:
-    st.query_params[name] = value
-
-
-def _new_chat_session_id() -> str:
-    return uuid.uuid4().hex
-
-
-def get_chat_session_id() -> str:
-    if "chat_session_id" not in st.session_state:
-        session_id = _get_query_param(CHAT_SESSION_PARAM) or _new_chat_session_id()
-        st.session_state.chat_session_id = session_id
-        _set_query_param(CHAT_SESSION_PARAM, session_id)
-    return st.session_state.chat_session_id
-
-
-def load_chat_history() -> list[dict]:
+def api(path,body=None):
+    req=Request(OPS+path,data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json'})
     try:
-        conn = get_chat_store_connection()
-        _flush_pending_chat_deletions(conn)
-        messages = CHAT_STORE.load_messages(conn, get_chat_session_id())
-        st.session_state.chat_history_loaded = True
-        _mark_chat_store_available()
-        return messages
-    except Exception:
-        st.session_state.chat_history_loaded = False
-        _mark_chat_store_unavailable()
-        return []
+        with urlopen(req,timeout=40) as r: return json.load(r)
+    except HTTPError as exc:
+        try: message=json.load(exc).get('error',str(exc))
+        except Exception: message=str(exc)
+        raise ValueError(message)
+    except (URLError,TimeoutError) as exc: raise ValueError('Operations service unavailable. The page will retry automatically.') from exc
 
 
-def _flush_pending_chat_deletions(conn) -> None:
-    pending = st.session_state.get("pending_chat_deletions", [])
-    for session_id in pending:
-        CHAT_STORE.clear_session(conn, session_id)
-    st.session_state.pending_chat_deletions = []
-
-
-def persist_chat_history() -> None:
-    """Best-effort sync; session_state remains authoritative during outages."""
+def action(path,body):
     try:
-        conn = get_chat_store_connection()
-        _flush_pending_chat_deletions(conn)
-        for index, message in enumerate(st.session_state.chat_history):
-            CHAT_STORE.append_message(
-                conn, get_chat_session_id(), index, message
-            )
-        st.session_state.chat_history_loaded = True
-        _mark_chat_store_available()
-    except Exception:
-        _mark_chat_store_unavailable()
+        result=api(path,body)
+        st.session_state.flash='Saved. Live state will update after the next streamed event.'
+        return result
+    except ValueError as exc:
+        st.error(str(exc))
+        return None
 
 
-def append_chat_message(message: dict) -> None:
-    st.session_state.chat_history.append(message)
-    persist_chat_history()
+if 'constraints' not in st.session_state: st.session_state.constraints=dict(DEFAULT)
+for key,value in st.session_state.constraints.items():
+    if 'constraint_'+key not in st.session_state: st.session_state['constraint_'+key]=value
 
-
-def clear_chat_session() -> None:
-    old_session_id = get_chat_session_id()
-    try:
-        conn = get_chat_store_connection()
-        CHAT_STORE.clear_session(conn, old_session_id)
-        _flush_pending_chat_deletions(conn)
-        _mark_chat_store_available()
-    except Exception:
-        pending = st.session_state.setdefault("pending_chat_deletions", [])
-        if old_session_id not in pending:
-            pending.append(old_session_id)
-        _mark_chat_store_unavailable()
-
-    st.session_state.chat_history = []
-    st.session_state.chat_history_loaded = False
-    st.session_state.chat_active = False
-    st.session_state.pop("pending_question", None)
-    st.session_state.chat_session_id = _new_chat_session_id()
-    _set_query_param(CHAT_SESSION_PARAM, st.session_state.chat_session_id)
-
-
-def retry_chat_store_if_due() -> None:
-    if not st.session_state.get("chat_store_unavailable", False):
-        return
-    if time.monotonic() < st.session_state.get("chat_store_retry_at", 0):
-        return
-
-    if st.session_state.chat_history:
-        persist_chat_history()
-    else:
-        st.session_state.chat_history = load_chat_history()
-
-
-def query(sql: str) -> pd.DataFrame:
-    try:
-        conn = get_connection()
-        return pd.read_sql(sql, conn)
-    except Exception as e:
-        st.error(f"Query error: {e}")
-        if "rw_conn" in st.session_state:
-            try:
-                st.session_state.rw_conn.close()
-            except Exception:
-                pass
-            del st.session_state.rw_conn
-        return pd.DataFrame()
-
-
-# --- Page config ---
-st.set_page_config(page_title="Smart Casino Floor", layout="wide")
-
-_ = get_chat_session_id()
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-    st.session_state.chat_history_loaded = False
-if not st.session_state.chat_history_loaded and not st.session_state.get(
-    "chat_store_unavailable", False
-):
-    st.session_state.chat_history = load_chat_history()
-retry_chat_store_if_due()
-if "chat_active" not in st.session_state:
-    st.session_state.chat_active = False
-
-# ================================================================
-# Sidebar: AI Chat Agent
-# ================================================================
 with st.sidebar:
-    st.header("AI Data Agent")
-    st.caption("Ask questions about the live casino data in natural language.")
-    if st.session_state.get("chat_store_unavailable", False):
-        st.warning(
-            "Chat persistence is temporarily unavailable. This browser session "
-            "will keep working and retry automatically."
-        )
-
-    # --- LLM provider config ---
-    provider = st.selectbox("LLM Provider", ["Claude", "OpenAI", "OpenRouter", "Azure OpenAI"],
-                            key="llm_provider")
-    api_key = os.environ.get("LLM_API_KEY", "")
-    api_key = st.text_input("API Key", value=api_key, type="password", key="llm_api_key")
-
-    if provider == "Claude":
-        claude_base_url = st.text_input(
-            "Base URL (optional)", key="claude_base_url",
-            placeholder="https://api.anthropic.com  (or a proxy)",
-            help="Leave blank for api.anthropic.com. Set a custom URL to use an Anthropic-compatible proxy (e.g. PackyAPI).",
-        )
-        claude_model = st.text_input("Model", value="claude-sonnet-4-20250514", key="claude_model")
-    elif provider == "OpenAI":
-        openai_base_url = st.text_input(
-            "Base URL (optional)", key="openai_base_url",
-            placeholder="https://api.openai.com/v1  (or a proxy like PackyAPI)",
-            help="Leave blank for api.openai.com. Set a custom URL to use an OpenAI-compatible proxy (e.g. PackyAPI, OpenRouter, LiteLLM).",
-        )
-        openai_model = st.text_input("Model", value="gpt-4o", key="openai_model")
-    elif provider == "OpenRouter":
-        st.caption("Routes to `https://openrouter.ai/api/v1`. Use OpenRouter model slugs like `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4`, `google/gemini-2.0-flash-exp`.")
-        openrouter_model = st.text_input(
-            "Model", value="openai/gpt-4o-mini", key="openrouter_model",
-            help="See https://openrouter.ai/models for the full catalog.",
-        )
-    elif provider == "Azure OpenAI":
-        azure_url = st.text_input("Azure Endpoint URL", key="azure_url",
-                                  placeholder="https://your-resource.openai.azure.com/")
-        azure_model = st.text_input("Deployment Name", value="gpt-4o", key="azure_model")
-
+    st.markdown('### ♠ Smart Casino')
+    st.caption('OPERATIONS WORKSPACE · 2.0')
+    st.page_link('app.py',label='Floor operations',icon='🗺️')
+    st.page_link('pages/1_Player_Analytics.py',label='Player analytics & chat',icon='📊')
+    if st.button('Start guided tour',key='start_tour',use_container_width=True):
+        st.session_state.tour_request=str(uuid.uuid4())
     st.divider()
-
-    # --- Display chat history ---
-    for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            if msg.get("sql"):
-                with st.expander("SQL Query"):
-                    st.code(msg["sql"], language="sql")
-            if msg.get("data") is not None and not msg["data"].empty:
-                with st.expander("Raw Data"):
-                    st.dataframe(msg["data"], hide_index=True, use_container_width=True)
-
-    # --- Example questions ---
-    if not st.session_state.chat_history:
-        st.markdown("**Try asking:**")
-        for eq in EXAMPLE_QUESTIONS:
-            if st.button(eq, key=f"eq_{eq}", use_container_width=True):
-                st.session_state.pending_question = eq
-                st.rerun()
-
-    # --- Chat input ---
-    user_input = st.chat_input("Ask about the casino data...", key="chat_input")
-
-    # Check for pending question from example buttons
-    if "pending_question" not in st.session_state and user_input:
-        st.session_state.pending_question = user_input
-
-    # If a question is pending, show user message + thinking placeholder immediately
-    if "pending_question" in st.session_state:
-        q = st.session_state.pending_question
-        # Append user message exactly once
-        if not (st.session_state.chat_history and
-                st.session_state.chat_history[-1].get("role") == "user" and
-                st.session_state.chat_history[-1].get("content") == q):
-            append_chat_message({"role": "user", "content": q})
-            st.session_state.chat_active = True
-            with st.chat_message("user"):
-                st.markdown(q)
-        with st.chat_message("assistant"):
-            st.markdown("_Thinking…_")
-
-    # --- Clear chat button ---
-    if st.session_state.chat_history:
-        if st.button("Clear Chat", use_container_width=True):
-            clear_chat_session()
-            st.rerun()
-
-    # --- Resume auto-refresh toggle ---
-    if st.session_state.chat_active:
-        st.caption("Dashboard auto-refresh is paused while chatting.")
-        if st.button("Resume Auto-Refresh", use_container_width=True):
-            st.session_state.chat_active = False
-            st.rerun()
+    st.markdown('**Demo scenarios**')
+    st.caption('10× clock · 1 demo minute = 6 real seconds. Actions affect this local simulation.')
+    for label,kind in [('Dining group arrives','surge'),('Reassign relief dealers','staff_shortage'),('Restore relief dealers','restore_staff'),('Interrupt telemetry','outage'),('Resume telemetry','resume'),('Reset floor scenario','reset')]:
+        if st.button(label,key='scenario_'+kind,use_container_width=True):
+            if action('/scenario',{'kind':kind,'request_id':str(uuid.uuid4())}): st.success('Scenario queued')
+    st.divider()
+    with st.expander('AI connection',expanded=False):
+        provider=st.selectbox('Provider',['OpenAI','Claude','OpenRouter'],key='ops_provider')
+        key=st.text_input('API key',type='password',key='ops_key')
+        model=st.text_input('Model',value='gpt-4o-mini',key='ops_model')
+        base=st.text_input('Base URL (optional)',value='',key='ops_base')
+        st.caption('Optional. Without a key, supported goal templates and manual constraints remain available. Keys are not written to the action ledger.')
+    st.caption('Kafka → RisingWave → Operations API\n\nVersion 2.0 · 1.0 baseline preserved')
 
 
-# ================================================================
-# Main Dashboard
-# ================================================================
-st.title("Smart Casino Floor")
-st.caption("Real-time ML-powered gaming recommendations & high-roller detection")
+def map_figure(snapshot,point,layer,selected):
+    fig=go.Figure()
+    projected={t['id']:t for t in point['tables']} if point else {}
+    zones=[('entry',2.4,9.7),('vip',7.6,9.7),('slots',2.4,5.6),('main',7.6,5.6),('blackjack',7.6,2.7)]
+    pits=point['pits'] if point else snapshot['pits']
+    for pit,x,y in zones:
+        q=pits[pit]['queue']
+        fig.add_annotation(x=x,y=y,text=f"<b>{PITS[pit].upper()}</b> · {q} waiting",showarrow=False,font=dict(size=11,color='#abc0d7'))
+    for t in snapshot['tables']:
+        v=projected.get(t['id'],t)
+        occ=v['occupied']/t['capacity']
+        closed=v['status']!='open'
+        color='#273449' if closed else '#ec875b' if occ>=.85 else '#4ab9a6' if occ>.4 else '#6c91b7'
+        if layer=='Queue pressure' and not closed: color='#ec875b' if pits[t['pit']]['queue']>5 else '#4ab9a6'
+        if layer=='Theo' and not closed:
+            edge={'baccarat':.0115,'blackjack':.0075,'slots':.075}[t['game']]
+            color='#d6af63' if v['occupied']*v['minimum']*edge>15 else '#607faf'
+        short=t['id'].replace('bac_left_','E').replace('bac_vip_','V').replace('bac_','B').replace('slots_','S').replace('bj_','J')
+        text=f"<b>{short}</b><br>HK${v['minimum']:g}<br>{v['occupied']}/{t['capacity']}" if not closed else f"<b>{short}</b><br>{v['status'].upper()}"
+        table_theo=v['occupied']*v['minimum']*1.4*{'baccarat':.0115,'blackjack':.0075,'slots':.075}[t['game']]*1.5*60
+        fig.add_trace(go.Scatter(x=[t['x']],y=[t['y']],mode='markers+text',text=[text],textposition='middle center',textfont=dict(size=9,color='#ffffff'),
+                                customdata=[[t['id']]],marker=dict(size=51,symbol='circle' if t['game']=='blackjack' else 'square',color=color,line=dict(color='#f5d48c' if selected==t['id'] else '#3a4b63',width=3 if selected==t['id'] else 1)),
+                                hovertemplate=f"<b>{t['id']}</b><br>{v['status']} · {v['occupied']}/{t['capacity']} seats<br>HK${v['minimum']:g} minimum<br>Modeled Theo HK${table_theo:,.0f}/hr<extra></extra>",showlegend=False))
+    fig.update_layout(height=570,margin=dict(t=5,b=10,l=0,r=0),paper_bgcolor='#101b2c',plot_bgcolor='#101b2c',
+                      xaxis=dict(visible=False,range=[-.3,10.4]),yaxis=dict(visible=False,range=[-.1,10.4]),clickmode='event+select',uirevision='floor-map')
+    return fig
 
-# --- Top-level KPIs ---
-cur_df = query("""
-    SELECT
-        COUNT(DISTINCT player_id) AS active_players,
-        AVG(avg_bet) AS avg_bet,
-        SUM(total_bet) AS total_wagered,
-        SUM(theo_win_window) AS theo_win_window,
-        AVG(effective_house_edge) AS avg_house_edge,
-        AVG(win_rate) AS avg_win_rate,
-        MAX(window_end) AS latest_window
-    FROM mv_player_latest_features
-""")
 
-if not cur_df.empty and cur_df["active_players"].iloc[0] is not None and int(cur_df["active_players"].iloc[0]) > 0:
-    cur = cur_df.iloc[0]
-    cur_bet = float(cur["avg_bet"])
-    cur_wagered = float(cur["total_wagered"])
-    cur_theo = float(cur["theo_win_window"] or 0.0)
-    cur_edge = float(cur["avg_house_edge"] or 0.0)
-    cur_wr = float(cur["avg_win_rate"])
-
-    d_bet = cur_bet - BASELINE["avg_bet"]
-    d_wagered = cur_wagered - BASELINE["wagered_per_5min"]
-    d_theo = cur_theo - BASELINE["theo_per_5min"]
-    d_edge = cur_edge - BASELINE["house_edge"]
-    lbl = BASELINE["label"]
-
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Active Players", int(cur["active_players"]))
-    c2.metric("Avg Bet", f"${cur_bet:,.0f}",
-              delta=f"{'-' if d_bet < 0 else '+'}${abs(d_bet):,.0f} {lbl}" if abs(d_bet) >= 1 else None)
-    c3.metric("Total Wagered (window)", f"${cur_wagered:,.0f}",
-              delta=f"{'-' if d_wagered < 0 else '+'}${abs(d_wagered):,.0f} {lbl}" if abs(d_wagered) >= 1 else None)
-    c4.metric("Theo Win (window)", f"${cur_theo:,.0f}",
-              delta=f"{'-' if d_theo < 0 else '+'}${abs(d_theo):,.0f} {lbl}" if abs(d_theo) >= 1 else None,
-              help="Theoretical Win = Σ(bet × house_edge). Casino's expected profit from this window's play, independent of short-term luck.")
-    c5.metric("Effective House Edge", f"{cur_edge:.2%}",
-              delta=f"{d_edge:+.2%} {lbl}" if abs(d_edge) >= 0.0001 else None,
-              delta_color="normal",
-              help="Blended house edge given the actual game mix being played. Higher = more profitable game mix.")
-
-    st.caption(
-        f"Current window: {cur['latest_window']}  |  "
-        f"Baseline (last month daily avg): Avg Bet ${BASELINE['avg_bet']}, "
-        f"Wagered/window ${BASELINE['wagered_per_5min']:,}, "
-        f"Theo/window ${BASELINE['theo_per_5min']:,}, "
-        f"House Edge {BASELINE['house_edge']:.2%}"
-    )
-else:
-    st.info("Waiting for player data to arrive...")
-
-st.divider()
-
-# --- Charts ---
-left, right = st.columns(2)
-
-with left:
-    st.subheader("High Roller Radar")
-    radar_df = query("""
-        SELECT player_id, tier, archetype,
-               ROUND(high_roller_similarity::numeric, 3) AS similarity,
-               ROUND(avg_bet::numeric, 0) AS avg_bet,
-               ROUND(cumulative_gaming_spend::numeric, 0) AS total_spend,
-               ROUND(cumulative_theo_win::numeric, 0) AS theo_win,
-               ROUND(spend_per_minute::numeric, 1) AS spend_per_min,
-               category_diversity
-        FROM mv_high_roller_radar
-        ORDER BY high_roller_similarity DESC
-        LIMIT 15
-    """)
-    if not radar_df.empty:
-        fig = px.scatter(
-            radar_df, x="spend_per_min", y="similarity", size="avg_bet",
-            color="tier", hover_data=["player_id", "archetype", "total_spend"],
-            title="Similarity vs. Spend Velocity",
-            labels={"spend_per_min": "Spend per Minute ($)", "similarity": "High Roller Similarity"},
-        )
-        fig.update_layout(height=350, margin=dict(t=40, b=20))
-        st.plotly_chart(fig, use_container_width=True)
+def render_planner(snapshot,fresh):
+    left,right=st.columns([1.1,1])
+    with left:
+        st.markdown('#### Give the floor a goal')
+        st.caption('Describe the outcome and constraints. Review the interpreted fields before evaluating scenarios.')
+        with st.form('goal_form'):
+            goal=st.text_area('Operational goal',value='For the next 30 minutes, keep the main floor wait within 5 minutes, with no additional staff. Keep VIP minimums unchanged.',height=100)
+            parsed=st.form_submit_button('Interpret goal',use_container_width=True)
+        if parsed:
+            llm={'provider':st.session_state.ops_provider,'api_key':st.session_state.ops_key,'model':st.session_state.ops_model,'base_url':st.session_state.ops_base}
+            if llm['provider']=='OpenRouter' and not llm['base_url']: llm['base_url']='https://openrouter.ai/api/v1'
+            with st.spinner('Interpreting constraints…'):
+                result=action('/parse-goal',{'text':goal,'constraints':st.session_state.constraints,'llm':llm})
+            if result:
+                st.session_state.constraints=result['constraints']
+                for k,v in result['constraints'].items(): st.session_state['constraint_'+k]=v
+                st.session_state.parse_result=result
+                st.session_state.goal=goal
+                if result['changes']: st.session_state.pop('plan_id',None)
+        result=st.session_state.get('parse_result')
+        if result:
+            st.caption(result['mode'])
+            if result['warning']: st.warning(result['warning'])
+            if result['changes']:
+                labels={'excluded':'Excluded tables','pit':'Area','horizon':'Horizon (min)','max_wait':'Wait target (min)','extra_staff':'Additional dealers','protect_vip':'Protect VIP minimums','priority':'Priority'}
+                for field,value in result['changes'].items():
+                    display=', '.join(value) if isinstance(value,list) else PITS.get(value,value) if isinstance(value,str) else str(value)
+                    st.write(f"{labels[field]}: {display}")
+        else: st.caption('Template mode available without an API key. Follow-up example: Exclude B08.')
+    with right:
+        st.markdown('#### Confirm constraints')
+        with st.form('constraints_form'):
+            a,b=st.columns(2)
+            pit=a.selectbox('Area',list(PITS),format_func=PITS.get,key='constraint_pit')
+            horizon=b.selectbox('Forecast horizon',[15,30],format_func=lambda v:f'{v} minutes',key='constraint_horizon')
+            wait=a.number_input('Maximum wait (min)',min_value=.5,max_value=30.0,step=.5,key='constraint_max_wait')
+            staff=b.number_input('Additional dealers',min_value=0,max_value=2,step=1,key='constraint_extra_staff')
+            priority=st.selectbox('First priority',['wait','cost','theo'],format_func=lambda v:{'wait':'Reduce waiting','cost':'Limit additional cost','theo':'Increase modeled Theo'}[v],key='constraint_priority')
+            protect=st.checkbox('Keep VIP minimums unchanged',key='constraint_protect_vip')
+            excluded=st.multiselect('Exclude tables',[t['id'] for t in snapshot['tables']],key='constraint_excluded')
+            submit=st.form_submit_button('Evaluate feasible scenarios',type='primary',use_container_width=True,disabled=not fresh)
+        if submit:
+            c=dict(pit=pit,horizon=horizon,max_wait=float(wait),extra_staff=int(staff),priority=priority,protect_vip=protect,excluded=excluded)
+            st.session_state.constraints=c
+            with st.spinner('Evaluating the same demand scenarios for every candidate…'):
+                plan=action('/plans',{'constraints':c,'goal':st.session_state.get('goal','Manual constraints')})
+            if plan:
+                st.session_state.plan_id=plan['id']
+                st.session_state.candidate_id=plan['recommended']
+    plan_id=st.session_state.get('plan_id')
+    if not plan_id:
+        st.info('Evaluate a plan to preview future occupancy and compare actions. The baseline is evaluated with the same external demand assumptions.')
+        return None,None
+    try: plan=api('/plans/'+plan_id)
+    except ValueError as exc: st.warning(str(exc)); return None,None
+    if plan['status']!='VALID':
+        st.warning('Plan needs review: '+str(plan['invalid_reason']))
+        if plan.get('replacement_id') and st.button('Review automatically updated plan'):
+            st.session_state.plan_id=plan['replacement_id']; st.session_state.pop('candidate_id',None); st.rerun()
     else:
-        st.info("No emerging high-roller candidates detected yet...")
+        st.caption(f"Snapshot #{plan['seq']} · demo minute {plan['minute']:.1f} · approval window ends {plan['expires']:.1f} · {plan['engine']}")
+    st.info(plan['explanation'])
+    feasible=[c for c in plan['candidates'] if c['feasible']]
+    current=st.session_state.get('candidate_id',plan['recommended'])
+    ids=[c['id'] for c in feasible]
+    if current not in ids: current=ids[0]
+    chosen=st.selectbox('Scenario to preview',ids,index=ids.index(current),format_func=lambda v:next(('★ ' if c['id']==plan['recommended'] else '')+c['label'] for c in feasible if c['id']==v),key='scenario_select_'+plan['id'])
+    st.session_state.candidate_id=chosen
+    candidate=next(c for c in feasible if c['id']==chosen)
+    rows=[]
+    for c in feasible:
+        rows.append({'Scenario':c['label'],'Wait / min':c['metrics']['wait'],'Queue':c['metrics']['queue'],'Theo / hr (HK$)':c['metrics']['theo_hour'],'Extra cost (HK$)':c['additional_cost'],'Wait target':'Met' if c['target_met'] else 'Not met','New seatings · floor':c['served'],'Queue departures · floor':c['abandoned']})
+    st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+    a,b=st.columns([3,1])
+    a.caption(f"Demand sensitivity for selected scenario: wait {candidate['wait_range'][0]:.1f}–{candidate['wait_range'][1]:.1f} min · queue {candidate['queue_range'][0]}–{candidate['queue_range'][1]}. Scenario range, not statistical confidence.")
+    if b.button('Create action for review',type='primary',disabled=not fresh or plan['status']!='VALID' or not candidate['action'],use_container_width=True):
+        task=action('/tasks',{'plan_id':plan['id'],'candidate_id':candidate['id']})
+        if task:
+            st.session_state.focus_table=task['action']['table']; st.success('Action created. Open Action center to approve and dispatch.')
+    with st.expander('Assumptions and unavailable actions'):
+        for a in plan['assumptions']: st.write('• '+a)
+        if plan.get('signal'): st.write('Observed business signal:',plan['signal'])
+        for c in plan['candidates']:
+            if not c['feasible']: st.write(c['label']+' — '+str(c['reason']))
+    return plan,candidate
 
-with right:
-    st.subheader("Active Recommendations")
-    action_summary = query("""
-        SELECT action_type, COUNT(*) AS cnt
-        FROM mv_actionable_recommendations GROUP BY action_type ORDER BY cnt DESC
-    """)
-    if not action_summary.empty:
-        fig2 = px.bar(
-            action_summary, x="action_type", y="cnt", color="action_type",
-            title="Recommendation Actions (All Players)",
-            labels={"action_type": "Action Type", "cnt": "Players"},
-            color_discrete_map={
-                "URGENT_RETENTION": "#e74c3c", "VIP_UPGRADE_CANDIDATE": "#f39c12",
-                "RETENTION_OFFER": "#3498db", "STANDARD_RECOMMENDATION": "#2ecc71",
-            },
-        )
-        fig2.update_layout(height=350, margin=dict(t=40, b=20), showlegend=False)
-        st.plotly_chart(fig2, use_container_width=True)
 
-# --- Explanations ---
-left, right = st.columns(2)
-with left:
-    st.markdown("""
-**How to read the Radar:**
-- **HR Score** = behavioral similarity to known high rollers (0-1). Factors: bet size, table game preference, cross-category spend, spend velocity.
-- **Higher & righter** on the chart = stronger high-roller signal. These are players who *aren't* VIPs yet but *behave* like ones.
-- **Action:** HR Score > 0.7 = proactive VIP outreach. Score 0.4-0.7 = monitor closely.
-    """)
-with right:
-    st.markdown("""
-**Recommendation categories:**
+def render_actions(data):
+    tasks=data['tasks']
+    active=[t for t in tasks if t['status'] in ('PENDING','ACCEPTED','EXECUTING','OBSERVING')]
+    st.markdown('#### Every recommendation has an owner')
+    st.caption('Approve → dispatch → physical confirmation → 5 / 15 minute observation. Additional dealers are checked again before dispatch.')
+    chosen_table=st.session_state.get('focus_table')
+    only=st.checkbox('Only selected table',value=False,key='filter_table')
+    show=st.checkbox('Include completed and expired actions',value=False)
+    visible=tasks if show else active
+    if only and chosen_table: visible=[t for t in visible if t['action']['table']==chosen_table]
+    if not visible: st.info('No actions in this view. Trigger the dining-group scenario or create an action from a plan.')
+    for t in visible[:15]:
+        with st.container(border=True):
+            a,b=st.columns([3,1])
+            a.markdown(f"**{t['title']}** · `{t['status']}`")
+            a.caption(f"Owner: {t['owner']} · Area: {PITS[t['constraints']['pit']]} · Created {t['created']:.1f} · Approval due {t['expires']:.1f} demo min")
+            b.caption('Task '+t['id'][:8])
+            if b.button('Locate / inspect',key='locate_'+t['id']):
+                st.session_state.pending_table=t['action']['table']; st.session_state.plan_id=t['plan_id']; st.rerun()
+            st.write(t['reason'])
+            before=t['before']; predicted=t['predicted']
+            st.caption(f"At creation: {before['queue']} waiting / {before['wait']:.1f} min · Scenario forecast: {predicted['queue']} waiting / {predicted['wait']:.1f} min")
+            if t['status']=='PENDING':
+                owner=st.selectbox('Assign owner',['Mei Wong','Alex Chan','Pit Manager'],key='owner_'+t['id'])
+                if st.button('Approve & assign',key='accept_'+t['id'],type='primary',disabled=not data['fresh']):
+                    if action('/tasks/'+t['id'],{'operation':'accept','owner':owner}): st.rerun()
+            elif t['status']=='ACCEPTED':
+                if st.button('Dispatch to floor',key='execute_'+t['id'],type='primary',disabled=not data['fresh']):
+                    if action('/tasks/'+t['id'],{'operation':'execute'}): st.rerun()
+            if t['status'] in ('PENDING','ACCEPTED'):
+                with st.expander('Reject / cancel'):
+                    reason=st.text_input('Reason',key='reason_'+t['id'])
+                    if st.button('Reject action' if t['status']=='PENDING' else 'Cancel action',key='reject_'+t['id']):
+                        if action('/tasks/'+t['id'],{'operation':'reject' if t['status']=='PENDING' else 'cancel','reason':reason}): st.rerun()
+            for period,observation in t['observations'].items():
+                m=observation['metrics']
+                st.write(f"**Observed +{period} min:** {m['queue']} waiting · {m['wait']:.1f} min wait · {m['seated']}/{m['capacity']} seated · modeled Theo HK${m['theo_hour']:,.0f}/hr")
+                if 'observed_theo' in observation:
+                    st.caption(f"Observed wagers generated HK${observation['observed_theo']:,.0f} Theo during this interval · extra labor cost HK${observation['observed_extra_cost']:,.0f}. These are simulation observations, not incremental profit.")
+                if not observation['complete']: st.warning('Observation contains a telemetry gap; exclude from effect conclusions.')
+            if t['status']=='OBSERVING' and '5' in t['observations']:
+                if st.button('Reviewed · close action',key='close_'+t['id']):
+                    if action('/tasks/'+t['id'],{'operation':'close'}): st.rerun()
+            with st.expander('Decision & execution timeline'):
+                st.dataframe(pd.DataFrame(t['timeline'])[['minute','status','reason']],hide_index=True,use_container_width=True)
+                st.caption('Observed changes do not establish causal incremental revenue.')
 
-Offer value = reinvestment % of the player's **cumulative Theo Win** (industry-standard comp sizing), with an `avg_bet` floor so new players still get a sensible offer.
 
-- **URGENT_RETENTION** — Churn risk > 45% AND Silver+ tier. Action: host call, aggressive save offer — **40% of cumulative theo**.
-- **VIP_UPGRADE_CANDIDATE** — ML predicts high-roller trajectory. Action: VIP invite, comp upgrade — **35% of cumulative theo**.
-- **RETENTION_OFFER** — Churn risk > 38%. Action: targeted offer matching preferred reward type — **25% of cumulative theo**.
-- **STANDARD_RECOMMENDATION** — Healthy player. Action: cross-sell next-best-game — **15% of cumulative theo** (baseline loyalty).
-    """)
+def select_on_map():
+    event=st.session_state.get('live_floor', {})
+    points=event.get('selection', {}).get('points', [])
+    if points:
+        st.session_state.pending_table=points[0]['customdata'][0]
 
-# --- Data tables ---
-left, right = st.columns(2)
-with left:
-    if not radar_df.empty:
-        def hr_color(val):
-            if val >= 0.7:
-                return "background-color: rgba(243, 156, 18, 0.3)"
-            elif val >= 0.55:
-                return "background-color: rgba(243, 156, 18, 0.15)"
-            return ""
-        styled_radar = radar_df.rename(columns={
-            "player_id": "Player", "tier": "Tier", "similarity": "HR Score",
-            "avg_bet": "Avg Bet", "total_spend": "Total Spend",
-            "theo_win": "Theo Win", "spend_per_min": "$/min",
-            "category_diversity": "Categories", "archetype": "Type",
-        })
-        st.dataframe(
-            styled_radar.style.applymap(hr_color, subset=["HR Score"]),
-            hide_index=True, use_container_width=True,
-        )
 
-with right:
-    recs_df = query("""
-        SELECT player_id, next_best_game, action_type, offer_sensitivity,
-               ROUND(churn_probability::numeric, 3) AS churn_prob,
-               ROUND(high_roller_score::numeric, 3) AS hr_score,
-               high_roller_trajectory AS hr_trajectory, tier,
-               ROUND(cumulative_theo_win::numeric, 0) AS theo_win,
-               ROUND(offer_value::numeric, 0) AS offer_value
-        FROM mv_actionable_recommendations
-        ORDER BY
-            CASE action_type WHEN 'URGENT_RETENTION' THEN 1
-                WHEN 'VIP_UPGRADE_CANDIDATE' THEN 2
-                WHEN 'RETENTION_OFFER' THEN 3 ELSE 4 END,
-            churn_probability DESC
-        LIMIT 20
-    """)
-    if not recs_df.empty:
-        st.dataframe(
-            recs_df.rename(columns={
-                "player_id": "Player", "next_best_game": "Suggested Game",
-                "action_type": "Action", "churn_prob": "Churn Risk",
-                "hr_score": "HR Score", "hr_trajectory": "HR Track",
-                "tier": "Tier", "theo_win": "Theo Win",
-                "offer_value": "Offer $", "offer_sensitivity": "Best Offer",
-            }),
-            hide_index=True, use_container_width=True,
-        )
-    else:
-        st.info("Waiting for ML predictions...")
+@st.fragment(run_every='3s')
+def workspace():
+    if st.session_state.get('pending_table'):
+        tid=st.session_state.pop('pending_table')
+        st.session_state.focus_table=tid
+        st.session_state.table_inspector=tid
+    try: data=api('/overview')
+    except ValueError as exc: st.warning(str(exc)); return
+    s=data['snapshot']
+    if not s: st.info('Waiting for the first floor snapshot through Kafka and RisingWave…'); return
+    state_label='LIVE · '+str(data['age'])+'s old' if data['fresh'] else 'STALE · actions paused'
+    st.markdown(f'<div class="hero"><div><div class="eyebrow">SMART CASINO / FLOOR OPERATIONS</div><h1>Decide ahead. Act with confidence.</h1><div class="small">{html.escape(s["scenario"])} · demo minute {s["minute"]:.1f} · 10× simulation</div></div><span class="badge">{state_label}</span></div>',unsafe_allow_html=True)
+    if not data['fresh']: st.error('Telemetry is stale. Values below are the last observed state; new plans and dispatch are paused. Resume telemetry in the sidebar.')
+    if st.session_state.get('flash'): st.caption(st.session_state.pop('flash'))
+    m=s['metrics']; cols=st.columns(5)
+    for col,label,value in zip(cols,['Occupied seats','Guests waiting','Average queue age','Open positions','Active actions'],[f"{m['seated']} / {m['capacity']}",m['queue'],f"{m['wait']:.1f} min",f"{m['open_tables']} / 36",sum(t['status'] in ('PENDING','ACCEPTED','EXECUTING','OBSERVING') for t in data['tasks'])]): col.metric(label,value)
+    if data['notices']:
+        n=data['notices'][0]
+        st.info(n['title']+' · '+n['detail'])
+    tabs=st.tabs(['Floor & scenarios','Action center','Evidence & learning'])
+    with tabs[0]:
+        plan,candidate=None,None
+        if st.session_state.get('plan_id'):
+            try:
+                plan=api('/plans/'+st.session_state.plan_id)
+                candidate=next((v for v in plan['candidates'] if v['id']==st.session_state.get('candidate_id',plan['recommended'])),None)
+            except ValueError: pass
+        a,b,c=st.columns([1,1,2])
+        horizon=a.radio('Map time',[0,15,30],format_func=lambda x:'Now' if x==0 else f'+{x} min',horizontal=True)
+        layer=b.selectbox('Map layer',['Occupancy','Queue pressure','Theo'])
+        ids=[t['id'] for t in s['tables']]
+        focus=st.session_state.get('focus_table','bac_08')
+        if focus not in ids: focus=ids[0]
+        focused=c.selectbox('Inspect table',ids,index=ids.index(focus),key='table_inspector')
+        st.session_state.focus_table=focused
+        point=candidate['points'][horizon] if candidate and horizon else None
+        if horizon and not candidate: st.warning('Generate a scenario first. Showing current observations.')
+        if point and plan['status']!='VALID': st.warning('Historical forecast: '+str(plan['invalid_reason'])+' · Generate a fresh plan below before creating an action.')
+        if point: st.caption(f"Saved forecast from demo minute {plan['minute']:.1f} · {candidate['label']} · +{horizon} min. The live state continues independently.")
+        selection=st.plotly_chart(map_figure(s,point,layer,focused),use_container_width=True,on_select=select_on_map,selection_mode='points',key='live_floor')
+        t=next(t for t in s['tables'] if t['id']==st.session_state.focus_table)
+        st.write(f"**{t['id']}** · {t['status']} · {t['occupied']}/{t['capacity']} seats · HK${t['minimum']:g} minimum · dealer {t['dealer'] or 'unassigned'}")
+        related=[a for a in data['tasks'] if a['action']['table']==t['id']]
+        if related: st.caption('Related actions: '+' · '.join(a['status']+' '+a['id'][:8] for a in related[:4]))
+        legend={'Occupancy':'Orange: at least 85% occupied · green: 40–85% · blue: below 40%', 'Queue pressure':'Orange: more than 5 guests waiting in the area · green: 5 or fewer', 'Theo':'Gold: modeled Theo above HK$1,890/hr · blue: below threshold'}[layer]
+        st.caption(legend+' · gray: unavailable · gold outline: selected. Queue age is the elapsed wait of guests currently in line.')
+        st.divider()
+        render_planner(s,data['fresh'])
+    with tabs[1]: render_actions(data)
+    with tabs[2]:
+        st.markdown('#### Streaming evidence')
+        st.caption(f"Kafka operational_events → RisingWave mv_ops_latest_snapshot · run {s['run_id'][:8]} · sequence {s['seq']} · event age {data['age']}s")
+        if s.get('signal'): st.info(s['signal']['explanation']+' · This relationship is a demo assumption, not a calibrated causal claim.')
+        st.markdown('**Relief staff & resources**')
+        st.dataframe(pd.DataFrame([d for d in s['dealers'] if d['id'].startswith(('F','X'))]),hide_index=True,use_container_width=True)
+        st.markdown('**Recent physical events**')
+        st.dataframe(pd.DataFrame(list(reversed(s['events']))[:25]),hide_index=True,use_container_width=True)
+        st.markdown('**Forecast error review**')
+        if data['reviews']: st.dataframe(pd.DataFrame(data['reviews']),hide_index=True,use_container_width=True)
+        else: st.info('Saved forecasts become reviewable after 15 demo minutes (about 90 seconds).')
+        st.caption('Baseline comparisons with an intervening action or telemetry gap are excluded. Forecast errors support later model calibration, not automatic policy changes.')
+        with st.expander('Plan audit trail'):
+            st.dataframe(pd.DataFrame(data['plans']),hide_index=True,use_container_width=True)
+            if data['plans']:
+                pid=st.selectbox('Restore saved plan',[p['id'] for p in data['plans']])
+                if st.button('Open saved plan'):
+                    st.session_state.plan_id=pid; st.session_state.pop('candidate_id',None); st.rerun()
 
-st.divider()
+workspace()
 
-# --- Theo Win section ---
-st.subheader("Theoretical Win & House Advantage")
-theo_left, theo_mid, theo_right = st.columns([1.2, 1.2, 1])
-
-with theo_left:
-    theo_tier_df = query("""
-        SELECT tier,
-               players,
-               ROUND(total_theo_win::numeric, 0)       AS total_theo,
-               ROUND(avg_theo_per_player::numeric, 0)  AS avg_theo,
-               ROUND(avg_effective_house_edge::numeric, 4) AS avg_edge
-        FROM mv_theo_by_tier
-        ORDER BY
-            CASE tier WHEN 'diamond' THEN 1 WHEN 'platinum' THEN 2
-                      WHEN 'gold' THEN 3 WHEN 'silver' THEN 4
-                      WHEN 'bronze' THEN 5 ELSE 6 END
-    """)
-    if not theo_tier_df.empty:
-        fig_theo = px.bar(
-            theo_tier_df, x="tier", y="total_theo", color="tier",
-            title="Cumulative Theo Win by Tier",
-            labels={"tier": "Tier", "total_theo": "Total Theo Win ($)"},
-            color_discrete_map={
-                "diamond": "#b9f2ff", "platinum": "#e5e4e2", "gold": "#f1c40f",
-                "silver": "#bdc3c7", "bronze": "#cd7f32",
-            },
-        )
-        fig_theo.update_layout(height=320, margin=dict(t=40, b=20), showlegend=False)
-        st.plotly_chart(fig_theo, use_container_width=True)
-
-with theo_mid:
-    if not theo_tier_df.empty:
-        fig_edge = px.bar(
-            theo_tier_df, x="tier", y="avg_edge", color="tier",
-            title="Avg Effective House Edge by Tier",
-            labels={"tier": "Tier", "avg_edge": "Effective House Edge"},
-            color_discrete_map={
-                "diamond": "#b9f2ff", "platinum": "#e5e4e2", "gold": "#f1c40f",
-                "silver": "#bdc3c7", "bronze": "#cd7f32",
-            },
-        )
-        fig_edge.update_yaxes(tickformat=".2%")
-        fig_edge.update_layout(height=320, margin=dict(t=40, b=20), showlegend=False)
-        st.plotly_chart(fig_edge, use_container_width=True)
-
-with theo_right:
-    st.markdown("**House Advantage reference**")
-    edge_lines = "\n".join([f"- **{g}** — {e:.2%}" for g, e in HOUSE_EDGES.items()])
-    st.markdown(edge_lines)
-    st.caption(
-        "**Theo Win** = Σ(bet × house_edge). The casino's expected profit regardless of short-term luck. "
-        "Effective house edge = Theo Win ÷ Total Wagered — a player shifting from slots to baccarat "
-        "or blackjack lowers this number even if they bet more."
-    )
-    st.caption(
-        "Reinvestment tiers (offer_value): **40%** of theo for urgent retention, **35%** for VIP upgrade, "
-        "**25%** for standard retention, **15%** for baseline loyalty."
-    )
-
-st.divider()
-
-# ================================================================
-# Casino Floor Plan — live occupancy + starting-minimum recommendations
-# ================================================================
-st.subheader("Live Table Demand Balancer")
-st.caption(
-    "Each marker is one table. The latest one-minute active-customer count is compared "
-    "with capacity and other tables in the same pit. Baccarat and blackjack tables may "
-    "receive a new starting minimum to rebalance demand; slot machines are monitored "
-    "for load only. The maximum limit is never changed."
-)
-
-floor_df = query("""
-    SELECT table_id, game_type, pit_group, table_x, table_y,
-           seat_capacity, limit_min, limit_max,
-           active_players, bets,
-           ROUND(avg_bet::numeric, 0)         AS avg_bet,
-           ROUND(max_bet::numeric, 0)         AS max_bet,
-           ROUND(total_bet::numeric, 0)       AS total_bet,
-           ROUND(theo_win_window::numeric, 0) AS theo_win_window,
-           ROUND((occupancy_rate * 100)::numeric, 0) AS occupancy_pct,
-           ROUND((pit_occupancy_rate * 100)::numeric, 0) AS pit_occupancy_pct,
-           action_type,
-           suggested_limit_min,
-           recommendation_reason,
-           estimated_seat_delta,
-           current_theo_per_hour,
-           projected_theo_per_hour,
-           estimated_theo_delta_per_hour,
-           impact_confidence
-    FROM mv_table_recommendations
-""")
-
-ACTION_COLORS = {
-    "RAISE_MINIMUM": "#ef4444",  # crowded: redirect demand away
-    "LOWER_MINIMUM": "#38bdf8",  # underused: attract peer overflow
-    "BUSY":          "#f59e0b",  # high occupancy without a cold peer
-    "IDLE":          "#64748b",  # low occupancy without a busy peer
-    "BALANCED":      "#22c55e",  # target operating range
-    "MONITOR_ONLY":  "#94a3b8",  # slots: load visibility, no limit action
-}
-GAME_SYMBOLS = {
-    "slots":     "star",
-    "baccarat":  "square",
-    "blackjack": "circle",
-}
-
-if not floor_df.empty:
-    active_customers = int(floor_df["active_players"].sum())
-    total_capacity = int(floor_df["seat_capacity"].sum())
-    occupied_capacity = floor_df[["active_players", "seat_capacity"]].min(axis=1).sum()
-    floor_occupancy = occupied_capacity / total_capacity if total_capacity else 0.0
-    changes_needed = int(floor_df["action_type"].isin(
-        ["RAISE_MINIMUM", "LOWER_MINIMUM"]
-    ).sum())
-    crowded_tables = int(floor_df["action_type"].isin(
-        ["RAISE_MINIMUM", "BUSY"]
-    ).sum())
-    estimated_theo_impact = float(
-        floor_df.loc[
-            floor_df["action_type"].isin(["RAISE_MINIMUM", "LOWER_MINIMUM"]),
-            "estimated_theo_delta_per_hour",
-        ].sum()
-    )
-
-    kpi_1, kpi_2, kpi_3, kpi_4, kpi_5 = st.columns(5)
-    kpi_1.metric("Active table visits (1 min)", active_customers)
-    kpi_2.metric("Floor occupancy", f"{floor_occupancy:.0%}")
-    kpi_3.metric("Crowded tables", crowded_tables)
-    kpi_4.metric("Minimum changes", changes_needed)
-    kpi_5.metric(
-        "Est. Theo impact / hr",
-        f"{'-' if estimated_theo_impact < 0 else '+'}HK${abs(estimated_theo_impact):,.0f}",
-        help="Scenario estimate for the currently recommended minimum changes, not a guaranteed result.",
-    )
-
-    # Keep the map full-width so every table tile has enough room for its live
-    # signage. Guidance follows below instead of squeezing the floor sideways.
-    floor_left = st.container()
-    floor_right = st.container()
-
-    with floor_left:
-        # Build the floor map with go.Figure directly (not px.scatter) so every
-        # trace has an explicit, identical marker.size=18. px.scatter with
-        # color=action_type × symbol=game_type silently splits into many traces
-        # where update_traces(marker=dict(size=...)) did not apply uniformly —
-        # producing the "some tiles big, some tiles small" artefact. Here we
-        # render one trace per (game, action) combination with hard-coded size.
-        plot_df = floor_df.copy()
-        plot_df["limit_label"] = plot_df.apply(
-            lambda r: f"HK${int(r['limit_min'])}-HK${int(r['limit_max'])}",
-            axis=1,
-        )
-        plot_df["suggested_label"] = plot_df.apply(
-            lambda r: (
-                "N/A (monitor only)" if r["game_type"] == "slots"
-                else f"HK${int(r['suggested_limit_min'])}"
-            ),
-            axis=1,
-        )
-        plot_df["seat_impact_label"] = plot_df.apply(
-            lambda r: (
-                f"Release {abs(int(r['estimated_seat_delta']))} seat(s)"
-                if r["estimated_seat_delta"] < 0
-                else (
-                    f"Fill {int(r['estimated_seat_delta'])} seat(s)"
-                    if r["estimated_seat_delta"] > 0
-                    else "No modeled seat change"
-                )
-            ),
-            axis=1,
-        )
-        plot_df["theo_impact_label"] = plot_df["estimated_theo_delta_per_hour"].apply(
-            lambda value: f"{'-' if value < 0 else '+'}HK${abs(float(value)):,.0f}/hr"
-        )
-        # Distinct one-minute visitors can exceed physical seats as people turn
-        # over. The on-floor sign shows occupied seats, capped at capacity.
-        plot_df["display_players"] = plot_df[[
-            "active_players", "seat_capacity"
-        ]].min(axis=1).astype(int)
-        plot_df["map_label"] = plot_df.apply(
-            lambda r: (
-                f"<b>{int(r['display_players'])}/{int(r['seat_capacity'])}</b>"
-                if r["game_type"] == "slots"
-                else (
-                    f"<b>HK${int(r['limit_min'])}</b>"
-                    f"<br>{int(r['display_players'])}/{int(r['seat_capacity'])}"
-                )
-            ),
-            axis=1,
-        )
-
-        MARKER_SIZE = 46  # Two-line table signage that remains readable on narrow screens.
-
-        fig_floor = go.Figure()
-        for game in ["slots", "baccarat", "blackjack"]:
-            symbol = GAME_SYMBOLS[game]
-            game_rows = plot_df[plot_df["game_type"] == game]
-            if game_rows.empty:
-                continue
-            for action in [
-                "RAISE_MINIMUM", "LOWER_MINIMUM", "BUSY", "IDLE",
-                "BALANCED", "MONITOR_ONLY",
-            ]:
-                rows = game_rows[game_rows["action_type"] == action]
-                if rows.empty:
-                    continue
-                fig_floor.add_trace(go.Scatter(
-                    x=rows["table_x"],
-                    y=rows["table_y"],
-                    mode="markers+text",
-                    marker=dict(
-                        size=MARKER_SIZE,
-                        symbol=symbol,
-                        color=ACTION_COLORS[action],
-                        line=dict(width=1, color="#111"),
-                        sizemode="diameter",
-                    ),
-                    text=rows["map_label"],
-                    textposition="middle center",
-                    textfont=dict(size=9, color="#0b1220"),
-                    name=f"{action}, {game}",
-                    legendgroup=action,
-                    hovertemplate=(
-                        "<b>%{customdata[0]}</b><br>"
-                        "Game: %{customdata[1]}<br>"
-                        "Action: %{customdata[2]}<br>"
-                        "Customers / capacity: %{customdata[3]} / %{customdata[4]}<br>"
-                        "Table occupancy: %{customdata[5]:.0f}%<br>"
-                        "Pit occupancy: %{customdata[6]:.0f}%<br>"
-                        "Bets: %{customdata[7]}<br>"
-                        "Avg bet: $%{customdata[8]:,.0f}<br>"
-                        "Theo Win: $%{customdata[9]:,.0f}<br>"
-                        "Current betting range: %{customdata[10]}<br>"
-                        "Suggested starting minimum: %{customdata[11]}<br>"
-                        "Why: %{customdata[12]}<br>"
-                        "Estimated seat impact: %{customdata[13]}<br>"
-                        "Theo/hour now: HK$%{customdata[14]:,.0f}<br>"
-                        "Projected Theo/hour: HK$%{customdata[15]:,.0f}<br>"
-                        "Estimated Theo impact: %{customdata[16]}<br>"
-                        "Impact confidence: %{customdata[17]}"
-                        "<extra></extra>"
-                    ),
-                    customdata=rows[[
-                        "table_id", "game_type", "action_type", "active_players",
-                        "seat_capacity", "occupancy_pct", "pit_occupancy_pct", "bets",
-                        "avg_bet", "theo_win_window", "limit_label", "suggested_label",
-                        "recommendation_reason", "seat_impact_label", "current_theo_per_hour",
-                        "projected_theo_per_hour", "theo_impact_label", "impact_confidence",
-                    ]].values,
-                ))
-
-        fig_floor.update_layout(
-            title="Live Floor Map — HK$ minimum | customers/seats",
-        )
-
-        # Pit labels — white, clearly ABOVE each cluster so they never sit
-        # on top of tile shapes. Positions chosen to fit in the gaps between
-        # clusters given the tables_dim (x, y) grid.
-        def _pit_label(x, y, text):
-            fig_floor.add_annotation(
-                x=x, y=y, text=f"<b>{text}</b>", showarrow=False,
-                font=dict(size=16, color="#ffffff", family="Helvetica"),
-                bgcolor="rgba(15,17,23,0.75)", borderpad=6,
-                xanchor="center", yanchor="middle",
-            )
-
-        # Baccarat left and VIP pits share y=7.5/8.5 for exact row alignment.
-        _pit_label(2.4, 10.1, "BACCARAT (left pit)")
-        # Standard slots cluster: tiles at y=3.5 & 4.5 → label above top row
-        _pit_label(2.4,  5.7, "SLOTS (standard)")
-        # ——— BACCARAT standard pit: tiles at y=3.5 & 4.5, x=5.8-9.4 → label above ———
-        _pit_label(7.6,  5.7, "BACCARAT pit")
-        # ——— BACCARAT VIP room: tiles at y=7.5 & 8.5, x=5.8-9.4 → label above ———
-        _pit_label(7.6, 10.1, "BACCARAT VIP")
-        # Blackjack pit sits below the main baccarat pit on narrow layouts.
-        _pit_label(7.6, 2.7, "BLACKJACK")
-
-        fig_floor.update_xaxes(visible=False, range=[-0.5, 10.5])
-        fig_floor.update_yaxes(visible=False, range=[-0.2, 10.7],
-                               scaleanchor="x", scaleratio=1)
-        fig_floor.update_layout(
-            height=760,
-            margin=dict(t=60, b=120, l=10, r=10),
-            plot_bgcolor="#0e1117",
-            paper_bgcolor="#0e1117",
-            legend=dict(
-                orientation="h",
-                yanchor="top", y=-0.18,             # legend well below plot edge
-                xanchor="center", x=0.5,
-                bgcolor="rgba(0,0,0,0)",
-                font=dict(size=12, color="#e5e7eb"),
-                itemsizing="constant",              # legend icons also uniform
-            ),
-        )
-        st.plotly_chart(fig_floor, use_container_width=True)
-
-    with floor_right:
-        st.markdown("**Starting minimum guidance**")
-        st.markdown(
-            "- **RAISE_MINIMUM** — baccarat/blackjack occupancy is at least 85% while a peer in the same "
-            "pit is at or below 35%; raise one denomination step to redirect demand.\n"
-            "- **LOWER_MINIMUM** — baccarat/blackjack occupancy is at or below 35% while a peer is at least "
-            "85%; lower one denomination step to attract overflow.\n"
-            "- **MONITOR_ONLY** — slot load is visible, but no minimum-limit action is generated.\n"
-            "- **BUSY** — high demand across the pit; monitor before changing one table.\n"
-            "- **IDLE** — low demand without nearby overflow to redirect yet.\n"
-            "- **BALANCED** — occupancy is in the target operating range."
-        )
-        st.caption(
-            "Active customers are distinct players seen during the latest one-minute "
-            "window. Recommendations apply only to baccarat and blackjack and change "
-            "only the starting minimum. Baccarat/blackjack markers show current HK$ starting "
-            "minimum and occupied seats/capacity; slot stars show occupancy only. Displayed "
-            "seats are capped at physical capacity, while hover retains distinct one-minute "
-            "visitors. Full table IDs are available on hover. "
-            "Capacity, thresholds, and denomination floors are configured in "
-            "`05_floor_plan_mvs.sql`."
-        )
-
-        # Priority list of tables that need action
-        action_priority = {
-            "RAISE_MINIMUM": 1, "LOWER_MINIMUM": 2,
-            "BUSY": 3, "IDLE": 4, "BALANCED": 5, "MONITOR_ONLY": 6,
-        }
-        priority_df = floor_df.copy()
-        priority_df["priority"] = priority_df["action_type"].map(action_priority)
-        priority_df = (
-            priority_df[priority_df["action_type"].isin(
-                ["RAISE_MINIMUM", "LOWER_MINIMUM"]
-            )]
-            .sort_values(["priority", "occupancy_pct"], ascending=[True, False])
-        )
-        if not priority_df.empty:
-            st.markdown("**Recommended changes now**")
-            priority_df["estimated_outcome"] = priority_df.apply(
-                lambda r: (
-                    f"HK${int(r['limit_min']):,} -> HK${int(r['suggested_limit_min']):,}; "
-                    f"{'release' if r['estimated_seat_delta'] < 0 else 'fill'} "
-                    f"{abs(int(r['estimated_seat_delta']))} seat(s); "
-                    f"Theo/hr {'-' if r['estimated_theo_delta_per_hour'] < 0 else '+'}"
-                    f"HK${abs(float(r['estimated_theo_delta_per_hour'])):,.0f}"
-                ),
-                axis=1,
-            )
-            show_cols = ["table_id", "pit_group", "action_type", "active_players",
-                         "seat_capacity", "occupancy_pct", "pit_occupancy_pct",
-                         "estimated_outcome", "impact_confidence"]
-            st.dataframe(
-                priority_df[show_cols].rename(columns={
-                    "table_id": "Table", "pit_group": "Pit",
-                    "action_type": "Action", "active_players": "Customers",
-                    "seat_capacity": "Capacity", "occupancy_pct": "Occupancy %",
-                    "pit_occupancy_pct": "Pit Avg %", "estimated_outcome": "Estimated outcome",
-                    "impact_confidence": "Confidence",
-                }),
-                hide_index=True, use_container_width=True, height=260,
-            )
-            st.caption(
-                "Impact scenario uses the latest one-minute table/pit Theo rate. Raising a minimum "
-                "assumes roughly 20% of occupied seats are released; lowering captures half of the "
-                "within-pit occupancy gap. Wager-intensity changes are capped, and confidence reflects "
-                "the number of bets observed in the window."
-            )
-        else:
-            st.info("No starting-minimum changes are needed in the latest window.")
-else:
-    st.info("Waiting for per-table data (the first one-minute window is still filling)...")
-
-st.divider()
-
-# --- Bottom: distributions ---
-st.subheader("Player Activity Distribution")
-bottom_left, bottom_right = st.columns(2)
-
-with bottom_left:
-    game_dist = query("""
-        SELECT 'Slots' AS game, AVG(pct_slots) AS pct FROM mv_player_latest_features
-        UNION ALL SELECT 'Baccarat', AVG(pct_baccarat) FROM mv_player_latest_features
-        UNION ALL SELECT 'Blackjack', AVG(pct_blackjack) FROM mv_player_latest_features
-    """)
-    if not game_dist.empty:
-        fig3 = px.pie(game_dist, values="pct", names="game", title="Game Type Distribution")
-        fig3.update_layout(height=300, margin=dict(t=40, b=20))
-        st.plotly_chart(fig3, use_container_width=True)
-
-with bottom_right:
-    tier_dist = query("""
-        SELECT tier, COUNT(DISTINCT player_id) AS players
-        FROM mv_player_latest_features GROUP BY tier ORDER BY players DESC
-    """)
-    if not tier_dist.empty:
-        fig4 = px.bar(tier_dist, x="tier", y="players", title="Players by Tier", color="tier")
-        fig4.update_layout(height=300, margin=dict(t=40, b=20), showlegend=False)
-        st.plotly_chart(fig4, use_container_width=True)
-
-# ================================================================
-# Post-render: process pending chat question (after main dashboard renders)
-# ================================================================
-if "pending_question" in st.session_state:
-    q = st.session_state.pop("pending_question")
-    if not api_key:
-        append_chat_message({
-            "role": "assistant",
-            "content": "Please enter your API key in the sidebar to use the chat agent.",
-        })
-    else:
-        try:
-            kwargs = {}
-            if provider == "Claude":
-                base = (st.session_state.get("claude_base_url") or "").strip()
-                if base:
-                    kwargs["base_url"] = base
-                kwargs["model"] = st.session_state.get("claude_model", "claude-sonnet-4-20250514")
-            elif provider == "OpenAI":
-                base = (st.session_state.get("openai_base_url") or "").strip()
-                if base:
-                    kwargs["base_url"] = base
-                kwargs["model"] = st.session_state.get("openai_model", "gpt-4o")
-            elif provider == "OpenRouter":
-                kwargs["model"] = st.session_state.get("openrouter_model", "openai/gpt-4o-mini")
-            elif provider == "Azure OpenAI":
-                kwargs["base_url"] = st.session_state.get("azure_url", "")
-                kwargs["model"] = st.session_state.get("azure_model", "gpt-4o")
-
-            agent = create_agent(provider, api_key, **kwargs)
-            conn = get_connection()
-            history_for_agent = st.session_state.chat_history[:-1]
-            result = agent.ask(q, conn, history=history_for_agent)
-
-            if result.get("error"):
-                append_chat_message({
-                    "role": "assistant",
-                    "content": f"Error: {result['error']}",
-                    "sql": result.get("sql"),
-                })
-            else:
-                append_chat_message({
-                    "role": "assistant",
-                    "content": result["answer"],
-                    "sql": result.get("sql"),
-                    "data": result.get("data"),
-                })
-        except Exception as e:
-            append_chat_message({
-                "role": "assistant",
-                "content": f"Agent error: {e}",
-            })
-    st.rerun()
-
-# --- Auto-refresh (paused when chat is active) ---
-if not st.session_state.get("chat_active", False):
-    time.sleep(REFRESH_INTERVAL)
-    st.rerun()
+# The tour lives outside the refreshing workspace so live updates do not reset it.
+tour_html=Path(__file__).with_name('tour.html').read_text()
+components.html(tour_html.replace('__TOUR_REQUEST__',json.dumps(st.session_state.get('tour_request',''))),height=0)

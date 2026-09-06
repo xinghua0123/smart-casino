@@ -1,0 +1,21 @@
+# Development overlay using the already-built 1.0 Python runtimes on this workstation.
+# All application code comes from the working tree. Standard fresh installs use docker-compose.yml.
+services:
+  data-producer:
+    image: smart-casino-floor-data-producer:latest
+    working_dir: /workspace
+    command: ["python", "-m", "data_producer.floor_simulator"]
+    volumes:
+      - ./data_producer:/workspace/data_producer:ro
+      - ./casino:/workspace/casino:ro
+  operations-service:
+    image: smart-casino-floor-dashboard:latest
+    working_dir: /workspace
+    command: ["python", "-m", "operations_service.server"]
+    volumes:
+      - ./operations_service:/workspace/operations_service:ro
+      - ./casino:/workspace/casino:ro
+  dashboard:
+    image: smart-casino-floor-dashboard:latest
+    volumes:
+      - ./dashboard:/app:ro

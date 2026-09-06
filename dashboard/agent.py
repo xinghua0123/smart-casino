@@ -18,6 +18,10 @@ import psycopg2
 SCHEMA_CONTEXT = """
 You are a data analyst assistant for a real-time casino analytics dashboard powered by RisingWave (a streaming SQL database).
 
+## Operational state (2.0 preview)
+For actual current seats and minimums, use mv_ops_table_state: table_id, pit (main/entry/vip/blackjack/slots), status, occupied, capacity, minimum, run_id, seq, wall_time (Unix seconds), sim_minute. mv_ops_pit_state has pit, seated, open_capacity, open_tables, oldest_table_event. Check wall_time freshness against EXTRACT(EPOCH FROM NOW()); older than 15 seconds is stale, not zero activity. These take priority over legacy occupancy instructions below.
+Player feature/radar/recommendation views retain records across demo resets and historical windows. Do not call these all currently present guests; actual floor occupancy comes from operational state. Player models and operational scenario parameters are synthetic demonstration models, not validated production predictions.
+
 ## Available Tables and Materialized Views
 
 ### mv_player_features

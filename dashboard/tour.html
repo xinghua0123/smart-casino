@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en"><body><script>
+((request) => {
+  // Run the controller in the host realm. Streamlit may replace the component's
+  // iframe when the sidebar changes width; its event handlers must survive that.
+  function install(request) {
+  const host = window, doc = host.document;
+  const storageKey = 'smart-casino-floor-tour-v1';
+  if (host.casinoFloorTour) { host.casinoFloorTour.launch(request); return; }
+  const visible = el => !!el && el.getClientRects().length > 0;
+  const text = (selector, label) => [...doc.querySelectorAll(selector)].find(el =>
+    visible(el) && el.textContent.trim() === label);
+  const button = label => text('button', label);
+  const heading = label => text('h4', label);
+  const field = label => [...doc.querySelectorAll('textarea,input')].find(el =>
+    visible(el) && el.getAttribute('aria-label') === label);
+  const tab = label => text('[role="tab"]', label);
+  const block = el => el?.closest('[data-testid="stForm"]') || el;
+  const steps = [
+    {title:'Welcome to your floor workspace', label:'Start with the live picture',
+      body:'Turn a floor signal into a reviewed action. This short tour follows the real controls from live conditions to planning, dispatch, and results.',
+      hint:'Use Next to explore. Only your own clicks on scenario or action buttons change the demo.',
+      target:() => doc.querySelector('.hero'), section:'Floor & scenarios'},
+    {title:'Read the room', label:'1 · Explore the live map',
+      body:'Click a table to inspect its seats, minimum bet, and assigned dealer. Use Map layer to switch between occupancy, queue pressure, and modeled Theo.',
+      hint:'Now shows the latest observation. Orange tables are busy; gray tables are unavailable.',
+      target:() => doc.querySelector('[data-testid="stPlotlyChart"]'), section:'Floor & scenarios'},
+    {title:'Create a busy-floor moment', label:'2 · Try a demo scenario',
+      body:'Click Dining group arrives in the sidebar to add a group-arrival signal and more demand in the main pit. Watch the queue and recommendations update.',
+      hint:'Optional: this changes the local simulation. You can also select Next to continue without triggering it.',
+      target:() => button('Dining group arrives'), sidebar:true},
+    {title:'Tell the floor what success looks like', label:'3 · Describe your goal',
+      body:'Use the English example or enter your own goal, then click Interpret goal. The fields on the right show the constraints to review.',
+      hint:'No API key? The displayed example works in template mode. For a follow-up, enter “Exclude B08” to keep previous constraints and exclude that table.',
+      target:() => block(field('Operational goal')), section:'Floor & scenarios'},
+    {title:'Keep the constraints in your hands', label:'4 · Evaluate feasible scenarios',
+      body:'Review the area, horizon, wait target, additional dealers, and VIP protection. Click Evaluate feasible scenarios to compare options using the same demand assumptions.',
+      hint:'A target may be unreachable. The system will explain this rather than silently relax your constraints.',
+      target:() => block(button('Evaluate feasible scenarios')), section:'Floor & scenarios'},
+    {title:'Compare before you act', label:'5 · Choose a scenario',
+      body:'After evaluating, use Scenario to preview to compare keeping the current setup, opening a table, or changing a minimum. Check wait, queue, Theo, and extra cost.',
+      hint:'Select an action scenario, then click Create action for review. Creating a task does not execute it. If no results are shown yet, evaluate the form above first.',
+      target:() => button('Create action for review') || button('Evaluate feasible scenarios'), section:'Floor & scenarios'},
+    {title:'Look 15 or 30 minutes ahead', label:'6 · Preview the future floor',
+      body:'Switch Map time to +15 min or +30 min to preview your selected scenario. Return to Now to see the live floor.',
+      hint:'Evaluate a scenario first. Forecasts are saved projections, and old plans are marked when conditions change.',
+      target:() => text('[data-testid="stWidgetLabel"] p','Map time')?.closest('[data-testid="stRadio"]'), section:'Floor & scenarios'},
+    {title:'Give the action an owner', label:'7 · Approve, then dispatch',
+      body:'In Action center, choose an owner and click Approve & assign. Review the accepted task, then click Dispatch to floor when ready.',
+      hint:'The tour never approves or dispatches for you. If the view is empty, create an action from a plan or try the dining-group scenario.',
+      target:() => heading('Every recommendation has an owner'), section:'Action center'},
+    {title:'Wait for confirmation, then measure', label:'8 · Follow the outcome',
+      body:'A dispatched task moves from EXECUTING to OBSERVING only after a floor confirmation. Results are recorded at +5 and +15 demo minutes; the task closes after the final observation.',
+      hint:'At 10× speed, those observations take about 30 and 90 seconds. Resource changes can invalidate a plan; stale telemetry pauses new actions.',
+      target:() => heading('Every recommendation has an owner'), section:'Action center'},
+    {title:'See the evidence behind the decision', label:'9 · Review and learn',
+      body:'Evidence & learning shows current staff, physical events, saved plans, and forecast errors. Compare predictions with later observations and check for data gaps.',
+      hint:'You are ready to explore. Replay this tour anytime using Start guided tour in the sidebar.',
+      target:() => heading('Streaming evidence'), section:'Evidence & learning'}
+  ];
+  let index=0, active=false, lastRequest='', previousFocus=null, lastTarget=null, scheduled=false;
+  const root=doc.createElement('div'); root.id='casino-guided-tour';
+  root.innerHTML=`<style>
+    #casino-guided-tour{position:fixed;inset:0;z-index:2147483000;pointer-events:none;font-family:Arial,sans-serif;color:#e6edf6}
+    #casino-guided-tour[hidden]{display:none}
+    #casino-guided-tour .tour-focus{position:fixed;border:2px solid #65dbc1;border-radius:12px;box-shadow:0 0 0 9999px rgba(3,9,19,.56);transition:top .15s,left .15s,width .15s,height .15s;pointer-events:none}
+    #casino-guided-tour .tour-card{position:fixed;width:min(390px,calc(100vw - 32px));box-sizing:border-box;padding:24px;border-radius:16px;border:1px solid #416077;background:#142238;box-shadow:0 16px 64px #0009;pointer-events:auto;max-height:calc(100dvh - 32px);overflow:auto}
+    #casino-guided-tour .tour-label{color:#81dfc9;font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;padding-right:24px}
+    #casino-guided-tour h2{font-size:23px;line-height:1.2;margin:12px 0;color:#fff;letter-spacing:-.4px}
+    #casino-guided-tour p{font-size:14px;line-height:1.6;margin:0 0 12px}
+    #casino-guided-tour .tour-hint{font-size:12px;color:#afc1d5;padding:12px;background:#0d1829;border-radius:8px}
+    #casino-guided-tour .tour-footer{display:flex;align-items:center;gap:8px;margin-top:18px}
+    #casino-guided-tour .tour-progress{font-size:12px;color:#afc1d5;margin-right:auto}
+    #casino-guided-tour button{font:600 13px Arial,sans-serif;cursor:pointer;border:1px solid #456075;border-radius:8px;background:transparent;color:#e6edf6;padding:9px 13px;min-height:36px}
+    #casino-guided-tour button:focus-visible{outline:3px solid #fff;outline-offset:3px}
+    #casino-guided-tour button:disabled{opacity:.4;cursor:default}
+    #casino-guided-tour .tour-next{background:#65dbc1;color:#0c1927;border-color:#65dbc1}
+    #casino-guided-tour .tour-close{position:absolute;top:12px;right:12px;border:0;padding:5px 9px;color:#afc1d5;font-size:20px}
+    #casino-guided-tour .tour-skip{border:0;padding-left:0;color:#afc1d5;font-weight:400}
+    @media(max-width:700px){
+      #casino-guided-tour .tour-card{padding:16px;max-height:46dvh}
+      #casino-guided-tour h2{font-size:20px;margin:8px 0}
+      #casino-guided-tour p{font-size:13px;line-height:1.4;margin-bottom:8px}
+      #casino-guided-tour .tour-hint{padding:8px;font-size:11px}
+      #casino-guided-tour .tour-footer{margin-top:10px}
+      [data-testid="stForm"],[data-testid="stRadio"],[data-testid="stPlotlyChart"],.hero,h4,button{scroll-margin-top:76px}
+    }
+    @media(prefers-reduced-motion:reduce){#casino-guided-tour .tour-focus{transition:none}}
+  </style>
+  <div class="tour-focus"></div>
+  <section class="tour-card" role="dialog" aria-modal="false" aria-labelledby="casino-tour-title" aria-describedby="casino-tour-body">
+    <button class="tour-close" aria-label="Close guided tour">×</button>
+    <div class="tour-copy" aria-live="polite"><div class="tour-label"></div><h2 id="casino-tour-title"></h2><p id="casino-tour-body"></p><p class="tour-hint"></p></div>
+    <div class="tour-footer"><span class="tour-progress"></span><button class="tour-back">Back</button><button class="tour-next">Next</button></div>
+    <button class="tour-skip">Skip tour</button>
+  </section>`;
+  root.hidden=true; doc.body.appendChild(root);
+  const el=selector => root.querySelector(selector), card=el('.tour-card'), focus=el('.tour-focus');
+  const remember=() => {try {host.localStorage.setItem(storageKey,'seen');} catch (_) { /* Storage may be disabled. */ }};
+  const seen=() => {try {return host.localStorage.getItem(storageKey)==='seen';} catch (_) {return false;}};
+  function position(scroll=false) {
+    if (!active) return;
+    const target=steps[index].target();
+    if (target && visible(target)) {
+      if (scroll || target!==lastTarget) target.scrollIntoView({block:host.innerWidth<=700?'start':'center',inline:'nearest',behavior:'instant'});
+      lastTarget=target;
+      const r=target.getBoundingClientRect(), pad=6;
+      focus.style.cssText=`top:${Math.max(0,r.top-pad)}px;left:${Math.max(0,r.left-pad)}px;width:${Math.min(r.width+2*pad,host.innerWidth)}px;height:${Math.min(r.height+2*pad,host.innerHeight)}px`;
+      focus.hidden=false;
+      // Place beside the target when possible, otherwise use the opposite screen edge.
+      const width=card.getBoundingClientRect().width, height=card.getBoundingClientRect().height;
+      const rightSpace=host.innerWidth-r.right, leftSpace=r.left;
+      let x=host.innerWidth-width-20, y=host.innerHeight-height-20;
+      if (host.innerWidth<=700) {x=(host.innerWidth-width)/2;y=host.innerHeight-height-16;}
+      else if (rightSpace>width+32) {x=r.right+20;y=Math.max(20,Math.min(r.top,host.innerHeight-height-20));}
+      else if (leftSpace>width+32) {x=r.left-width-20;y=Math.max(20,Math.min(r.top,host.innerHeight-height-20));}
+      else if (r.top>height+32) y=r.top-height-16;
+      else if (host.innerHeight-r.bottom>height+32) y=r.bottom+16;
+      card.style.left=Math.max(16,x)+'px';card.style.top=Math.max(16,y)+'px';
+    } else {
+      focus.hidden=true;card.style.left=Math.max(16,host.innerWidth-card.offsetWidth-20)+'px';card.style.top='90px';
+    }
+  }
+  function show() {
+    const step=steps[index];
+    if (step.section) {
+      const destination=tab(step.section);
+      if(destination && destination.getAttribute('aria-selected')!=='true') destination.click();
+    }
+    const sidebar=doc.querySelector('[data-testid="stSidebar"]');
+    if (step.sidebar && sidebar?.getAttribute('aria-expanded')!=='true') {
+      doc.querySelector('[data-testid="stSidebarCollapsedControl"] button')?.click();
+    } else if (!step.sidebar && host.innerWidth<=700 && sidebar?.getAttribute('aria-expanded')==='true') {
+      doc.querySelector('[data-testid="stSidebarCollapseButton"] button')?.click();
+    }
+    el('.tour-label').textContent=step.label;
+    el('h2').textContent=step.title;
+    el('#casino-tour-body').textContent=step.body;
+    el('.tour-hint').textContent=step.hint;
+    el('.tour-progress').textContent=`${index+1} of ${steps.length}`;
+    el('.tour-back').disabled=index===0;
+    el('.tour-next').textContent=index===steps.length-1?'Finish tour':'Next';
+    root.hidden=false;lastTarget=null;position(true);
+    host.setTimeout(() => position(true),300);
+    el('.tour-next').focus({preventScroll:true});
+  }
+  function stop() {
+    active=false;root.hidden=true;remember();
+    if(previousFocus?.isConnected) previousFocus.focus({preventScroll:true});
+  }
+  function launch(token) {
+    if(token && token!==lastRequest) {lastRequest=token;start();}
+    else if(!token && !active && !seen()) start();
+  }
+  function start() {previousFocus=doc.activeElement;index=0;active=true;remember();show();}
+  el('.tour-next').onclick=() => {if(index===steps.length-1) stop();else {index++;show();}};
+  el('.tour-back').onclick=() => {if(index>0) {index--;show();}};
+  el('.tour-close').onclick=stop;el('.tour-skip').onclick=stop;
+  doc.addEventListener('keydown',event => {if(active && event.key==='Escape') {event.preventDefault();stop();}});
+  doc.addEventListener('click',event => {
+    if(active && event.target.closest('a')?.getAttribute('href')?.includes('Player_Analytics')) stop();
+  });
+  function schedule() {
+    if(!active || scheduled) return;
+    scheduled=true;host.requestAnimationFrame(() => {scheduled=false;position();});
+  }
+  doc.addEventListener('scroll',schedule,true);host.addEventListener('resize',schedule);
+  // Streamlit replaces widget nodes during refreshes; re-acquire the current target.
+  new host.MutationObserver(records => {
+    if(records.some(record => !root.contains(record.target))) schedule();
+  }).observe(doc.body,{childList:true,subtree:true});
+  host.casinoFloorTour={launch};
+  launch(request);
+  }
+  const script=window.parent.document.createElement('script');
+  script.textContent='('+install.toString()+')('+JSON.stringify(request)+');';
+  window.parent.document.body.appendChild(script);
+  script.remove();
+})(__TOUR_REQUEST__);
+</script></body></html>

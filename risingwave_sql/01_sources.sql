@@ -2,7 +2,7 @@
 -- 01: Kafka Sources — ingest gaming, F&B, and hotel event streams
 -- ============================================================
 
-CREATE SOURCE gaming_events_src (
+CREATE SOURCE IF NOT EXISTS gaming_events_src (
     event_id        VARCHAR,
     event_type      VARCHAR,
     player_id       VARCHAR,
@@ -28,7 +28,7 @@ CREATE SOURCE gaming_events_src (
     scan.startup.mode = 'latest'
 ) FORMAT PLAIN ENCODE JSON;
 
-CREATE SOURCE fnb_events_src (
+CREATE SOURCE IF NOT EXISTS fnb_events_src (
     event_id        VARCHAR,
     event_type      VARCHAR,
     player_id       VARCHAR,
@@ -44,7 +44,7 @@ CREATE SOURCE fnb_events_src (
     scan.startup.mode = 'latest'
 ) FORMAT PLAIN ENCODE JSON;
 
-CREATE SOURCE hotel_events_src (
+CREATE SOURCE IF NOT EXISTS hotel_events_src (
     event_id        VARCHAR,
     event_type      VARCHAR,
     player_id       VARCHAR,

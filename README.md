@@ -2,13 +2,34 @@
 
 A reference demo showing **RisingWave** as a streaming feature store for personalized gaming recommendations, churn prediction, high-roller lookalike detection, and the industry-standard **Theoretical Win (Theo Win)** / **House Advantage** economics — all computed in real time over Kafka streams. Ships with a Streamlit dashboard and an embedded LLM chat agent.
 
+## 2.0 — Floor Operations Copilot
+
+Version **2.0** adds the **operations action center** and **future floor / scenario planning**, with natural-language constraint parsing, event-triggered replanning, and an English guided product tour. The user authorized the release commit and push on September 6, 2026. Annotated tags `1.0` and `2.0` identify the baseline and this demo release.
+
+- Real seats, queues, reserve tables and qualified relief staff; dynamic minimum changes affect subsequent simulation events.
+- Compare current setup, opening a table and changing minimums at +15 / +30 minutes using shared demand assumptions.
+- Approve, assign and dispatch an action; physical execution acknowledgement arrives through Kafka and RisingWave before the task enters observation.
+- Resource changes invalidate plans and produce alternatives while preserving approved constraints. Stale telemetry blocks new actions.
+- Record decisions, execution receipts, observed Theo / labor cost and forecast errors. Effects are not claimed as causal incremental revenue.
+- Existing player analytics and SQL chat remain available on a separate page, including retained history across demo resets.
+
+**Start:** `docker compose up --build -d`, then open <http://localhost:8501>. The existing workstation also supports `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-build` using its cached Python runtimes and live working-tree mounts.
+
+**AI:** optional `OPS_LLM_API_KEY`, `OPS_LLM_PROVIDER`, `OPS_LLM_MODEL`, `OPS_LLM_BASE_URL`, or configure the sidebar. Without a provider key the UI explicitly uses a limited template parser plus manual constraints. LLM output is validated as typed constraint changes, never executable SQL or commands.
+
+**Data path:** simulator → Kafka `operational_events` → RisingWave current-state MVs → operations service → Streamlit. Approved commands flow back to the simulator. The operations service uses a separate durable SQLite WAL ledger for transactional task state and audit; this does not replace RisingWave's streaming state.
+
+[Implementation plan](docs/V2_PLAN.md) · [Human acceptance walkthrough and limitations](docs/V2_ACCEPTANCE.md) · [Live test results](docs/LIVE_TEST_RESULTS.json)
+
+The architecture image and player-model reference below describe the original analytics pipeline. In 2.0, the new operations workspace owns live occupancy and action execution; the original floor view now uses streamed seat state, and retained player snapshots are explicitly labeled as historical analytics.
+
 ## Architecture
 
 ![Architecture](./architecture.png)
 
 **Data flow in one paragraph:** A producer emits gaming / F&B / hotel events into 3 Kafka topics. RisingWave ingests via Kafka sources and builds a stack of materialized views — 5-minute tumbling session features, running theo-win / house-edge aggregates, high-roller similarity scoring, the historical `mv_player_features`, and a one-row-per-player `mv_player_latest_features` snapshot. A Python ML service queries only that bounded snapshot every 10s, runs four scikit-learn models, and writes one prediction per player back into RisingWave via plain SQL INSERT. A final `mv_actionable_recommendations` MV layers business rules on top of the predictions, scaling offer values as a % of cumulative theo-win. The Streamlit dashboard queries the dashboard-facing MVs for live KPIs and charts, and its sidebar hosts a pluggable LLM chat agent that translates natural-language questions into SQL against the same MVs while persisting in-session chat memory to SQL.
 
-## Recent Changes
+## 1.0 Analytics Reference
 
 - **Live Table Demand Balancer:** the 36-position floor now has 24 baccarat tables, 4 blackjack tables, and 8 standard slot machines; the former penny-slot area is an 8-table entry baccarat pit. One-minute occupancy can trigger **RAISE_MINIMUM** or **LOWER_MINIMUM** only for baccarat and blackjack. Slots remain visible as **MONITOR_ONLY** and never receive minimum-limit recommendations. Only the starting minimum changes; the maximum stays fixed.
 - **Macau-style live floor labels:** baccarat squares and blackjack circles show current `HK$` starting minimum and occupied seats/capacity directly on each marker; displayed seats are capped at physical capacity, while full IDs and distinct one-minute visitors remain available on hover. Slot machines use stars and show occupancy only. The left and VIP baccarat pits share aligned rows, while Blackjack sits below the main pit so the map remains readable on narrow screens.

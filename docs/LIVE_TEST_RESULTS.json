@@ -1,0 +1,21 @@
+{
+  "passed": [
+    "fresh reset through Kafka/RisingWave",
+    "physical execution confirmation",
+    "duplicate dispatch has one effect",
+    "five-minute observation saved",
+    "services recover live telemetry",
+    "restart preserves action and receipt",
+    "fresh reset through Kafka/RisingWave",
+    "staff loss expires accepted action",
+    "automatic replanning retains constraints",
+    "outage marks data stale",
+    "stale data blocks planning",
+    "telemetry recovery",
+    "fresh reset through Kafka/RisingWave",
+    "dining signal and automatic opportunity",
+    "saved forecast reaches error review"
+  ],
+  "total": 15,
+  "finished_at": "2026-09-06T02:09:05Z"
+}

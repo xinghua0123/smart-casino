@@ -141,10 +141,11 @@ SELECT
     d.table_y,
     d.pit_group,
     d.seat_capacity,
-    d.limit_min,
+    COALESCE(o.minimum, d.limit_min) AS limit_min,
     d.limit_max,
     d.minimum_floor,
-    COALESCE(a.active_players, 0)        AS active_players,
+    COALESCE(o.status, 'closed') AS table_status,
+    COALESCE(o.occupied, 0)        AS active_players,
     COALESCE(a.bets, 0)                  AS bets,
     COALESCE(a.avg_bet, 0.0)             AS avg_bet,
     COALESCE(a.max_bet, 0.0)             AS max_bet,
@@ -153,11 +154,12 @@ SELECT
     a.window_start,
     CASE WHEN d.seat_capacity > 0
          THEN LEAST(
-             COALESCE(a.active_players, 0)::DOUBLE PRECISION / d.seat_capacity,
+             COALESCE(o.occupied, 0)::DOUBLE PRECISION / d.seat_capacity,
              1.0
          )
          ELSE 0.0 END                    AS occupancy_rate
 FROM tables_dim d
+LEFT JOIN mv_ops_table_state o ON d.table_id = o.table_id
 LEFT JOIN mv_table_latest a
     ON d.table_id = a.table_id;
 
@@ -182,6 +184,7 @@ GROUP BY pit_group;
 CREATE MATERIALIZED VIEW mv_table_recommendation_signals AS
 SELECT
     l.table_id,
+    l.table_status,
     l.game_type,
     l.table_x,
     l.table_y,
@@ -204,13 +207,13 @@ SELECT
     p.pit_min_occupancy_rate,
     p.pit_max_occupancy_rate,
     CASE
-        WHEN l.game_type = 'slots' THEN 'MONITOR_ONLY'
-        WHEN l.game_type IN ('baccarat', 'blackjack')
+        WHEN l.game_type = 'slots' OR l.table_status != 'open' THEN 'MONITOR_ONLY'
+        WHEN l.table_status = 'open' AND l.game_type IN ('baccarat', 'blackjack')
              AND l.occupancy_rate >= 0.85
              AND p.pit_min_occupancy_rate <= 0.35
              AND l.limit_min < l.limit_max
             THEN 'RAISE_MINIMUM'
-        WHEN l.game_type IN ('baccarat', 'blackjack')
+        WHEN l.table_status = 'open' AND l.game_type IN ('baccarat', 'blackjack')
              AND l.occupancy_rate <= 0.35
              AND p.pit_max_occupancy_rate >= 0.85
              AND l.limit_min > l.minimum_floor
@@ -222,7 +225,7 @@ SELECT
     -- Move by one familiar denomination step; never exceed the table maximum or
     -- go below the configured floor for its pit.
     CASE
-        WHEN l.game_type IN ('baccarat', 'blackjack')
+        WHEN l.table_status = 'open' AND l.game_type IN ('baccarat', 'blackjack')
              AND l.occupancy_rate >= 0.85
              AND p.pit_min_occupancy_rate <= 0.35
              AND l.limit_min < l.limit_max
@@ -235,7 +238,7 @@ SELECT
                 WHEN l.limit_min < 1000.0 THEN 1000.0
                 ELSE ROUND((l.limit_min * 1.5)::NUMERIC, 0)
             END)
-        WHEN l.game_type IN ('baccarat', 'blackjack')
+        WHEN l.table_status = 'open' AND l.game_type IN ('baccarat', 'blackjack')
              AND l.occupancy_rate <= 0.35
              AND p.pit_max_occupancy_rate >= 0.85
              AND l.limit_min > l.minimum_floor
@@ -253,11 +256,11 @@ SELECT
     CASE
         WHEN l.game_type = 'slots'
             THEN 'Slot machine load is monitored only; no starting-minimum recommendation applies.'
-        WHEN l.game_type IN ('baccarat', 'blackjack')
+        WHEN l.table_status = 'open' AND l.game_type IN ('baccarat', 'blackjack')
              AND l.occupancy_rate >= 0.85
              AND p.pit_min_occupancy_rate <= 0.35
             THEN 'Crowded table with spare capacity in the same pit; raise the starting minimum to redirect demand.'
-        WHEN l.game_type IN ('baccarat', 'blackjack')
+        WHEN l.table_status = 'open' AND l.game_type IN ('baccarat', 'blackjack')
              AND l.occupancy_rate <= 0.35
              AND p.pit_max_occupancy_rate >= 0.85
             THEN 'Underused table beside a crowded peer; lower the starting minimum to attract overflow.'

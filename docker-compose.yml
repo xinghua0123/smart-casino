@@ -49,7 +49,7 @@ services:
     command:
       - |
         echo "Creating Kafka topics..."
-        for topic in gaming_events fnb_events hotel_events recommendations actionable_recommendations; do
+        for topic in gaming_events fnb_events hotel_events recommendations actionable_recommendations operational_events; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic $$topic --partitions 1 --replication-factor 1
         done
         echo "All topics created."
@@ -70,13 +70,42 @@ services:
 
   # --- Application ---
   data-producer:
-    build: ./data_producer
+    build:
+      context: .
+      dockerfile: data_producer/Dockerfile
     restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+    volumes:
+      - simulator-state:/state
+
+  operations-service:
+    build:
+      context: .
+      dockerfile: operations_service/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"
+    depends_on:
+      rw-setup:
+        condition: service_completed_successfully
+    environment:
+      RISINGWAVE_HOST: risingwave
+      OPS_LLM_API_KEY: ${OPS_LLM_API_KEY:-}
+      OPS_LLM_PROVIDER: ${OPS_LLM_PROVIDER:-OpenAI}
+      OPS_LLM_MODEL: ${OPS_LLM_MODEL:-gpt-4o-mini}
+      OPS_LLM_BASE_URL: ${OPS_LLM_BASE_URL:-}
+    volumes:
+      - operations-state:/state
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   ml-service:
     build: ./ml_service
@@ -107,6 +136,9 @@ services:
       RISINGWAVE_HOST: risingwave
       RISINGWAVE_PORT: 4566
       LLM_API_KEY: ${LLM_API_KEY:-}
+      OPS_URL: http://operations-service:8090
 
 volumes:
   risingwave-state:
+  operations-state:
+  simulator-state:

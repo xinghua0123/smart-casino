@@ -1,7 +1,8 @@
 FROM python:3.11-slim
 WORKDIR /app
-COPY requirements.txt .
+COPY data_producer/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
+COPY data_producer .
+COPY casino /app/casino
 ENV PYTHONUNBUFFERED=1
-CMD ["python", "producer.py"]
+CMD ["python", "floor_simulator.py"]
