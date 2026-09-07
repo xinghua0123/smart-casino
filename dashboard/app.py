@@ -105,57 +105,58 @@ def map_figure(snapshot,point,layer,selected):
 
 
 def render_planner(snapshot,fresh):
-    left,right=st.columns([1.1,1])
-    with left:
-        st.markdown('#### Give the floor a goal')
-        st.caption('Describe the outcome and constraints. Review the interpreted fields before evaluating scenarios.')
-        with st.form('goal_form'):
-            goal=st.text_area('Operational goal',value='For the next 30 minutes, keep the main floor wait within 5 minutes, with no additional staff. Keep VIP minimums unchanged.',height=100)
-            parsed=st.form_submit_button('Interpret goal',use_container_width=True)
-        if parsed:
-            llm={'provider':st.session_state.ops_provider,'api_key':st.session_state.ops_key,'model':st.session_state.ops_model,'base_url':st.session_state.ops_base}
-            if llm['provider']=='OpenRouter' and not llm['base_url']: llm['base_url']='https://openrouter.ai/api/v1'
-            with st.spinner('Interpreting constraints…'):
-                result=action('/parse-goal',{'text':goal,'constraints':st.session_state.constraints,'llm':llm})
+    with st.expander('Advanced planning',expanded=False):
+        left,right=st.columns([1.1,1])
+        with left:
+            st.markdown('#### Give the floor a goal')
+            st.caption('Describe the outcome and constraints. Review the interpreted fields before evaluating scenarios.')
+            with st.form('goal_form'):
+                goal=st.text_area('Operational goal',value='For the next 30 minutes, keep the main floor wait within 5 minutes, with no additional staff. Keep VIP minimums unchanged.',height=100)
+                parsed=st.form_submit_button('Interpret goal',use_container_width=True)
+            if parsed:
+                llm={'provider':st.session_state.ops_provider,'api_key':st.session_state.ops_key,'model':st.session_state.ops_model,'base_url':st.session_state.ops_base}
+                if llm['provider']=='OpenRouter' and not llm['base_url']: llm['base_url']='https://openrouter.ai/api/v1'
+                with st.spinner('Interpreting constraints…'):
+                    result=action('/parse-goal',{'text':goal,'constraints':st.session_state.constraints,'llm':llm})
+                if result:
+                    st.session_state.constraints=result['constraints']
+                    for k,v in result['constraints'].items(): st.session_state['constraint_'+k]=v
+                    st.session_state.parse_result=result
+                    st.session_state.goal=goal
+                    if result['changes']: st.session_state.pop('plan_id',None)
+            result=st.session_state.get('parse_result')
             if result:
-                st.session_state.constraints=result['constraints']
-                for k,v in result['constraints'].items(): st.session_state['constraint_'+k]=v
-                st.session_state.parse_result=result
-                st.session_state.goal=goal
-                if result['changes']: st.session_state.pop('plan_id',None)
-        result=st.session_state.get('parse_result')
-        if result:
-            st.caption(result['mode'])
-            if result['warning']: st.warning(result['warning'])
-            if result['changes']:
-                labels={'excluded':'Excluded tables','pit':'Area','horizon':'Horizon (min)','max_wait':'Wait target (min)','extra_staff':'Additional dealers','protect_vip':'Protect VIP minimums','priority':'Priority'}
-                for field,value in result['changes'].items():
-                    display=', '.join(value) if isinstance(value,list) else PITS.get(value,value) if isinstance(value,str) else str(value)
-                    st.write(f"{labels[field]}: {display}")
-        else: st.caption('Template mode available without an API key. Follow-up example: Exclude B08.')
-    with right:
-        st.markdown('#### Confirm constraints')
-        with st.form('constraints_form'):
-            a,b=st.columns(2)
-            pit=a.selectbox('Area',list(PITS),format_func=PITS.get,key='constraint_pit')
-            horizon=b.selectbox('Forecast horizon',[15,30],format_func=lambda v:f'{v} minutes',key='constraint_horizon')
-            wait=a.number_input('Maximum wait (min)',min_value=.5,max_value=30.0,step=.5,key='constraint_max_wait')
-            staff=b.number_input('Additional dealers',min_value=0,max_value=2,step=1,key='constraint_extra_staff')
-            priority=st.selectbox('First priority',['wait','cost','theo'],format_func=lambda v:{'wait':'Reduce waiting','cost':'Limit additional cost','theo':'Increase modeled Theo'}[v],key='constraint_priority')
-            protect=st.checkbox('Keep VIP minimums unchanged',key='constraint_protect_vip')
-            excluded=st.multiselect('Exclude tables',[t['id'] for t in snapshot['tables']],key='constraint_excluded')
-            submit=st.form_submit_button('Evaluate feasible scenarios',type='primary',use_container_width=True,disabled=not fresh)
-        if submit:
-            c=dict(pit=pit,horizon=horizon,max_wait=float(wait),extra_staff=int(staff),priority=priority,protect_vip=protect,excluded=excluded)
-            st.session_state.constraints=c
-            with st.spinner('Evaluating the same demand scenarios for every candidate…'):
-                plan=action('/plans',{'constraints':c,'goal':st.session_state.get('goal','Manual constraints')})
-            if plan:
-                st.session_state.plan_id=plan['id']
-                st.session_state.candidate_id=plan['recommended']
+                st.caption(result['mode'])
+                if result['warning']: st.warning(result['warning'])
+                if result['changes']:
+                    labels={'excluded':'Excluded tables','pit':'Area','horizon':'Horizon (min)','max_wait':'Wait target (min)','extra_staff':'Additional dealers','protect_vip':'Protect VIP minimums','priority':'Priority'}
+                    for field,value in result['changes'].items():
+                        display=', '.join(value) if isinstance(value,list) else PITS.get(value,value) if isinstance(value,str) else str(value)
+                        st.write(f"{labels[field]}: {display}")
+            else: st.caption('Template mode available without an API key. Follow-up example: Exclude B08.')
+        with right:
+            st.markdown('#### Confirm constraints')
+            with st.form('constraints_form'):
+                a,b=st.columns(2)
+                pit=a.selectbox('Area',list(PITS),format_func=PITS.get,key='constraint_pit')
+                horizon=b.selectbox('Forecast horizon',[15,30],format_func=lambda v:f'{v} minutes',key='constraint_horizon')
+                wait=a.number_input('Maximum wait (min)',min_value=.5,max_value=30.0,step=.5,key='constraint_max_wait')
+                staff=b.number_input('Additional dealers',min_value=0,max_value=2,step=1,key='constraint_extra_staff')
+                priority=st.selectbox('First priority',['wait','cost','theo'],format_func=lambda v:{'wait':'Reduce waiting','cost':'Limit additional cost','theo':'Increase modeled Theo'}[v],key='constraint_priority')
+                protect=st.checkbox('Keep VIP minimums unchanged',key='constraint_protect_vip')
+                excluded=st.multiselect('Exclude tables',[t['id'] for t in snapshot['tables']],key='constraint_excluded')
+                submit=st.form_submit_button('Evaluate feasible scenarios',type='primary',use_container_width=True,disabled=not fresh)
+            if submit:
+                c=dict(pit=pit,horizon=horizon,max_wait=float(wait),extra_staff=int(staff),priority=priority,protect_vip=protect,excluded=excluded)
+                st.session_state.constraints=c
+                with st.spinner('Evaluating the same demand scenarios for every candidate…'):
+                    plan=action('/plans',{'constraints':c,'goal':st.session_state.get('goal','Manual constraints')})
+                if plan:
+                    st.session_state.plan_id=plan['id']
+                    st.session_state.candidate_id=plan['recommended']
     plan_id=st.session_state.get('plan_id')
     if not plan_id:
-        st.info('Evaluate a plan to preview future occupancy and compare actions. The baseline is evaluated with the same external demand assumptions.')
+        st.info('Open Action center to review floor recommendations. Custom goals and constraints are available in Advanced planning.')
         return None,None
     try: plan=api('/plans/'+plan_id)
     except ValueError as exc: st.warning(str(exc)); return None,None
@@ -182,7 +183,7 @@ def render_planner(snapshot,fresh):
     if b.button('Create action for review',type='primary',disabled=not fresh or plan['status']!='VALID' or not candidate['action'],use_container_width=True):
         task=action('/tasks',{'plan_id':plan['id'],'candidate_id':candidate['id']})
         if task:
-            st.session_state.focus_table=task['action']['table']; st.success('Action created. Open Action center to approve and dispatch.')
+            st.session_state.focus_table=task['action']['table']; st.success('Action created. Open Action center and click Approve to apply it.')
     with st.expander('Assumptions and unavailable actions'):
         for a in plan['assumptions']: st.write('• '+a)
         if plan.get('signal'): st.write('Observed business signal:',plan['signal'])
@@ -191,52 +192,59 @@ def render_planner(snapshot,fresh):
     return plan,candidate
 
 
+def wait_label(value):
+    return f"{value:.1f} min" if value is not None else "Unavailable"
+
+
 def render_actions(data):
-    tasks=data['tasks']
-    active=[t for t in tasks if t['status'] in ('PENDING','ACCEPTED','EXECUTING','OBSERVING')]
-    st.markdown('#### Every recommendation has an owner')
-    st.caption('Approve → dispatch → physical confirmation → 5 / 15 minute observation. Additional dealers are checked again before dispatch.')
-    chosen_table=st.session_state.get('focus_table')
-    only=st.checkbox('Only selected table',value=False,key='filter_table')
-    show=st.checkbox('Include completed and expired actions',value=False)
-    visible=tasks if show else active
-    if only and chosen_table: visible=[t for t in visible if t['action']['table']==chosen_table]
-    if not visible: st.info('No actions in this view. Trigger the dining-group scenario or create an action from a plan.')
+    run=data['snapshot']['run_id']
+    tasks=[t for t in data['tasks'] if t['run_id']==run]
+    st.markdown('#### Suggestions for your floor')
+    st.caption('Demand changes generate suggestions automatically. One approval applies the change; staff assignment is handled for you.')
+    pending=[t for t in tasks if t['status'] in ('PENDING','ACCEPTED')]
+    st.write(f"**{len(pending)} suggestion{'s' if len(pending)!=1 else ''} ready for approval**")
+    show=st.checkbox('Show past actions',value=False)
+    visible=tasks if show else [t for t in tasks if t['status'] in ('PENDING','ACCEPTED','EXECUTING','OBSERVING') or t['status']=='CLOSED' and data['snapshot']['minute']-(t['closed'] or 0)<15]
+    visible.sort(key=lambda t:({'PENDING':0,'ACCEPTED':0,'EXECUTING':1,'OBSERVING':2}.get(t['status'],3),0 if t['action']['kind']=='OPEN_TABLE' else 1))
+    if not visible: st.info('No suggestions needed right now. Try Dining group arrives to increase demand.')
     for t in visible[:15]:
         with st.container(border=True):
-            a,b=st.columns([3,1])
-            a.markdown(f"**{t['title']}** · `{t['status']}`")
-            a.caption(f"Owner: {t['owner']} · Area: {PITS[t['constraints']['pit']]} · Created {t['created']:.1f} · Approval due {t['expires']:.1f} demo min")
-            b.caption('Task '+t['id'][:8])
-            if b.button('Locate / inspect',key='locate_'+t['id']):
-                st.session_state.pending_table=t['action']['table']; st.session_state.plan_id=t['plan_id']; st.rerun()
-            st.write(t['reason'])
-            before=t['before']; predicted=t['predicted']
-            st.caption(f"At creation: {before['queue']} waiting / {before['wait']:.1f} min · Scenario forecast: {predicted['queue']} waiting / {predicted['wait']:.1f} min")
-            if t['status']=='PENDING':
-                owner=st.selectbox('Assign owner',['Mei Wong','Alex Chan','Pit Manager'],key='owner_'+t['id'])
-                if st.button('Approve & assign',key='accept_'+t['id'],type='primary',disabled=not data['fresh']):
-                    if action('/tasks/'+t['id'],{'operation':'accept','owner':owner}): st.rerun()
-            elif t['status']=='ACCEPTED':
-                if st.button('Dispatch to floor',key='execute_'+t['id'],type='primary',disabled=not data['fresh']):
-                    if action('/tasks/'+t['id'],{'operation':'execute'}): st.rerun()
+            status={'PENDING':'Ready to approve','ACCEPTED':'Ready to apply','EXECUTING':'Applying…','OBSERVING':'Applied','CLOSED':'Completed'}.get(t['status'],t['status'].title())
+            st.markdown(f"**{t['title']}** · {status}")
+            st.caption(PITS[t['constraints']['pit']])
+            if t.get('description'): st.write(t['description'])
+            elif t['action']['kind']=='OPEN_TABLE': st.write('Open this reserve table and assign an available dealer automatically.')
+            else: st.write(f"Apply a minimum of HK${t['action']['minimum']:g} to this table.")
             if t['status'] in ('PENDING','ACCEPTED'):
-                with st.expander('Reject / cancel'):
-                    reason=st.text_input('Reason',key='reason_'+t['id'])
-                    if st.button('Reject action' if t['status']=='PENDING' else 'Cancel action',key='reject_'+t['id']):
-                        if action('/tasks/'+t['id'],{'operation':'reject' if t['status']=='PENDING' else 'cancel','reason':reason}): st.rerun()
-            for period,observation in t['observations'].items():
-                m=observation['metrics']
-                st.write(f"**Observed +{period} min:** {m['queue']} waiting · {m['wait']:.1f} min wait · {m['seated']}/{m['capacity']} seated · modeled Theo HK${m['theo_hour']:,.0f}/hr")
-                if 'observed_theo' in observation:
-                    st.caption(f"Observed wagers generated HK${observation['observed_theo']:,.0f} Theo during this interval · extra labor cost HK${observation['observed_extra_cost']:,.0f}. These are simulation observations, not incremental profit.")
-                if not observation['complete']: st.warning('Observation contains a telemetry gap; exclude from effect conclusions.')
-            if t['status']=='OBSERVING' and '5' in t['observations']:
-                if st.button('Reviewed · close action',key='close_'+t['id']):
-                    if action('/tasks/'+t['id'],{'operation':'close'}): st.rerun()
-            with st.expander('Decision & execution timeline'):
+                approve,dismiss=st.columns([3,1])
+                if approve.button('Approve',key='approve_'+t['id'],type='primary',disabled=not data['fresh'],use_container_width=True):
+                    if action('/tasks/'+t['id'],{'operation':'approve'}): st.rerun(scope='fragment')
+                if dismiss.button('Dismiss',key='dismiss_'+t['id'],use_container_width=True):
+                    if action('/tasks/'+t['id'],{'operation':'reject' if t['status']=='PENDING' else 'cancel','reason':'Dismissed by manager'}): st.rerun(scope='fragment')
+            elif t['status']=='EXECUTING': st.info('Applying to the floor. Waiting for the live confirmation…')
+            elif t['status'] in ('FAILED','EXPIRED','REJECTED','CANCELLED'): st.caption(t['reason'])
+            impact=t.get('impact')
+            if impact:
+                before,after=impact['before'],impact['after']
+                q,w=st.columns(2)
+                q.metric('Guests waiting · on application',after['queue'],after['queue']-before['queue'],delta_color='inverse')
+                delta=after.get('estimated_wait')-before.get('estimated_wait') if after.get('estimated_wait') is not None and before.get('estimated_wait') is not None else None
+                w.metric('Estimated wait · on application',wait_label(after.get('estimated_wait')),f"{delta:+.1f} min" if delta is not None else None,delta_color='inverse')
+                if t['action']['kind']=='SET_MINIMUM': st.success(f"Minimum updated: HK\\${impact['previous_minimum']:g} → HK\\${impact['minimum']:g}")
+                else: st.success(f"Table opened · {after['capacity']-before['capacity']} seats added")
+                st.caption('Confirmed at application. Live totals continue to change as guests arrive and leave.')
+            with st.expander('Details & history'):
+                st.caption(f"Task {t['id'][:8]} · demo minute {t['created']:.1f} · approval due {t['expires']:.1f}")
+                before=t['before']; predicted=t['predicted']
+                st.caption(f"At suggestion: {before['queue']} waiting · average elapsed queue age {before['wait']:.1f} min. Scenario forecast: {predicted['queue']} waiting.")
+                if st.button('Locate / inspect',key='locate_'+t['id']):
+                    st.session_state.pending_table=t['action']['table'];st.session_state.plan_id=t['plan_id'];st.rerun()
+                for period,observation in t['observations'].items():
+                    m=observation['metrics']
+                    st.write(f"**Observed +{period} min:** {m['queue']} waiting · {m['seated']}/{m['capacity']} seated")
+                    if not observation['complete']: st.warning('Observation contains a telemetry gap.')
                 st.dataframe(pd.DataFrame(t['timeline'])[['minute','status','reason']],hide_index=True,use_container_width=True)
-                st.caption('Observed changes do not establish causal incremental revenue.')
+                st.caption('Estimated wait uses queue size and modeled seat turnover. Observed changes are not causal profit estimates.')
 
 
 def select_on_map():
@@ -258,13 +266,18 @@ def workspace():
     if not s: st.info('Waiting for the first floor snapshot through Kafka and RisingWave…'); return
     state_label='LIVE · '+str(data['age'])+'s old' if data['fresh'] else 'STALE · actions paused'
     st.markdown(f'<div class="hero"><div><div class="eyebrow">SMART CASINO / FLOOR OPERATIONS</div><h1>Decide ahead. Act with confidence.</h1><div class="small">{html.escape(s["scenario"])} · demo minute {s["minute"]:.1f} · 10× simulation</div></div><span class="badge">{state_label}</span></div>',unsafe_allow_html=True)
-    if not data['fresh']: st.error('Telemetry is stale. Values below are the last observed state; new plans and dispatch are paused. Resume telemetry in the sidebar.')
-    if st.session_state.get('flash'): st.caption(st.session_state.pop('flash'))
+    with st.container():
+        if not data['fresh']: st.error('Telemetry is stale. Values below are the last observed state; new plans and dispatch are paused. Resume telemetry in the sidebar.')
+        if st.session_state.get('flash'): st.caption(st.session_state.pop('flash'))
     m=s['metrics']; cols=st.columns(5)
-    for col,label,value in zip(cols,['Occupied seats','Guests waiting','Average queue age','Open positions','Active actions'],[f"{m['seated']} / {m['capacity']}",m['queue'],f"{m['wait']:.1f} min",f"{m['open_tables']} / 36",sum(t['status'] in ('PENDING','ACCEPTED','EXECUTING','OBSERVING') for t in data['tasks'])]): col.metric(label,value)
-    if data['notices']:
-        n=data['notices'][0]
-        st.info(n['title']+' · '+n['detail'])
+    for col,label,value in zip(cols,['Occupied seats','Guests waiting','Estimated wait','Open positions','Active actions'],[f"{m['seated']} / {m['capacity']}",m['queue'],wait_label(m.get('estimated_wait')),f"{m['open_tables']} / 36",sum(t['status'] in ('PENDING','ACCEPTED','EXECUTING','OBSERVING') for t in data['tasks'])]): col.metric(label,value)
+    ready=sum(t['run_id']==s['run_id'] and t['status'] in ('PENDING','ACCEPTED') for t in data['tasks'])
+    # Keep the tabs at a stable position when notices appear or disappear.
+    with st.container():
+        if ready: st.info(f"{ready} suggestion{'s' if ready!=1 else ''} ready in Action center — click Approve to apply a change.")
+        if data['notices']:
+            n=data['notices'][0]
+            st.info(n['title']+' · '+n['detail'])
     tabs=st.tabs(['Floor & scenarios','Action center','Evidence & learning'])
     with tabs[0]:
         plan,candidate=None,None
@@ -291,7 +304,7 @@ def workspace():
         related=[a for a in data['tasks'] if a['action']['table']==t['id']]
         if related: st.caption('Related actions: '+' · '.join(a['status']+' '+a['id'][:8] for a in related[:4]))
         legend={'Occupancy':'Orange: at least 85% occupied · green: 40–85% · blue: below 40%', 'Queue pressure':'Orange: more than 5 guests waiting in the area · green: 5 or fewer', 'Theo':'Gold: modeled Theo above HK$1,890/hr · blue: below threshold'}[layer]
-        st.caption(legend+' · gray: unavailable · gold outline: selected. Queue age is the elapsed wait of guests currently in line.')
+        st.caption(legend+' · gray: unavailable · gold outline: selected. Estimated wait is based on queue size and open seats. Actual elapsed queue age is retained in action details.')
         st.divider()
         render_planner(s,data['fresh'])
     with tabs[1]: render_actions(data)

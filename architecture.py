@@ -53,7 +53,7 @@ def render():
 
     label(60, 46, "SMART CASINO FLOOR / 2.0", 12, TEAL, "bold")
     label(60, 88, "Observe. Compare. Approve. Measure.", 30, TEXT, "bold")
-    label(60, 153, "Implemented demo architecture · Streaming observations and manager-reviewed actions", 15, MUTED)
+    label(60, 153, "Implemented demo architecture · Streaming observations and one-click approved actions", 15, MUTED)
 
     # Main operational path. All observed state reaches the service through RW.
     badge(60, 235, "01  PHYSICAL STATE", TEAL)
@@ -88,7 +88,7 @@ def render():
     badge(1315, 235, "04  DECISIONS & EXECUTION", TEAL)
     box(1315, 272, 380, 295, TEAL)
     label(1337, 295, "Operations service", 19, TEXT, "bold")
-    label(1337, 340, "Constrained scenario engine\nPlan checks & automatic replanning\nApproval, dispatch & observations", 12, MUTED)
+    label(1337, 340, "Constrained scenario engine\nPlan checks & automatic replanning\nOne-click approval & observations", 12, MUTED)
     ax.plot([1337, 1673], [450, 450], color=BORDER, lw=1)
     label(1337, 466, "SQLite WAL · operations-state", 12, TEAL, "bold")
     label(1337, 501, "Plans, tasks, commands & evidence", 11, MUTED)
@@ -108,7 +108,7 @@ def render():
 
     # UI request path (no automatic approval).
     line([(2140, 320), (2170, 320), (2170, 208), (1725, 208), (1725, 320), (1695, 320)], GOLD, True)
-    label(1915, 176, "Goals · review · explicit dispatch", 12, GOLD, ha="center")
+    label(1915, 176, "Suggestions · one-click approval", 12, GOLD, ha="center")
 
     # Simulator pulls reviewed commands from the API. Bridge around RW to avoid
     # implying that this return route passes through streaming SQL or Kafka.
@@ -116,7 +116,7 @@ def render():
                      (1254, 1090), (355, 1090), (355, 567)]
     line(command_route, GOLD, True)
     label(490, 1057, "Reviewed command delivery · simulator polls /commands every ~1s", 12, GOLD)
-    label(83, 601, "Validate → prepare → apply", 11, TEAL)
+    label(83, 601, "Validate → assign → apply", 11, TEAL)
     label(83, 635, "Confirmation returns in the\nnext streamed snapshot.", 11, MUTED)
 
     # Player ML is a separate analytics loop; it does not control operational tasks.
@@ -160,7 +160,7 @@ def render():
 
     box(60, 1215, 2080, 174, BORDER, "#101d2e")
     label(86, 1239, "EXECUTION CONTRACT", 11, TEAL, "bold")
-    label(86, 1273, "PENDING  →  ACCEPTED  →  EXECUTING  →  OBSERVING  →  CLOSED", 17, TEXT, "bold")
+    label(86, 1273, "PENDING  →  EXECUTING  →  OBSERVING  →  CLOSED", 17, TEXT, "bold")
     label(86, 1320, "Freshness + version + staff + conflict checks  ·  Unique command IDs  ·  +5 / +15 minute observations", 12, MUTED)
     label(86, 1353, "One action per scenario. Forecasts use demo assumptions; observed changes are not causal revenue lift.", 11, MUTED)
 

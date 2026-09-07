@@ -1,6 +1,6 @@
 """Stateful physical simulation. Commands are acknowledged only at their effective time."""
 import random
-from casino.domain import add_player, record, BASE_RATES, initial_state
+from casino.domain import add_player, record, BASE_RATES, initial_state, metrics
 
 
 def control(state, command):
@@ -102,8 +102,25 @@ def receive_command(state, command):
         d = next(d for d in state["dealers"] if d["id"] == command["action"]["dealer"])
         d.update(status="reserved",table=t["id"],version=d["version"]+1)
         t.update(status="opening",version=t["version"]+1)
-    receipt["effective_at"] = state["minute"] + (2 if command["action"]["kind"] == "OPEN_TABLE" else .5)
+    receipt["effective_at"] = state["minute"] + (0 if command.get("immediate") else 2 if command["action"]["kind"] == "OPEN_TABLE" else .5)
     record(state,"COMMAND_RECEIVED",t["id"],cid)
+    if command.get("immediate"):
+        advance(state,0)
+
+
+def seat_waiting_guests(state):
+    for t in state["tables"]:
+        t["occupied"] = sum(p["table"] == t["id"] for p in state["players"])
+    for p in sorted(state["players"],key=lambda p:(p["arrived"],p["id"])):
+        if p["table"]: continue
+        matches = [t for t in state["tables"] if t["pit"] == p["pit"] and t["status"] == "open"
+                   and t["occupied"] < t["capacity"] and t["minimum"] <= p["budget"]]
+        if matches:
+            t = min(matches,key=lambda t:(t["occupied"]/t["capacity"],t["id"]))
+            p.update(table=t["id"],seated=state["minute"])
+            t["occupied"] += 1
+            state["served"] += 1
+            record(state,"SEATED",p["id"],t["id"])
 
 
 def advance(state, dt):
@@ -119,6 +136,8 @@ def advance(state, dt):
             continue
         a = r["command"]["action"]
         t = next(t for t in state["tables"] if t["id"] == a["table"])
+        before=metrics(state,t["pit"])
+        previous_minimum=t["minimum"]
         error = None
         if a["kind"] == "OPEN_TABLE":
             d = next(d for d in state["dealers"] if d["id"] == a["dealer"])
@@ -142,6 +161,11 @@ def advance(state, dt):
         if not error: t["cooldown_until"] = state["minute"]+10
         r.update(status="FAILED" if error else "APPLIED",reason=error,minute=state["minute"])
         record(state,"COMMAND_FAILED" if error else "COMMAND_APPLIED",t["id"],error or r["id"])
+        if not error:
+            seat_waiting_guests(state)
+            r["impact"]=dict(before=before,after=metrics(state,t["pit"]),
+                             previous_minimum=previous_minimum,minimum=t["minimum"],pit=t["pit"])
+
     left = []
     for p in state["players"]:
         if p["table"] and state["minute"]-p["seated"] >= p["dwell"]:
@@ -162,18 +186,7 @@ def advance(state, dt):
         for _ in range(n):
             add_player(state,pit,rng)
             state["observed_arrivals"].append(dict(minute=state["minute"],pit=pit))
-    for t in state["tables"]:
-        t["occupied"] = sum(p["table"] == t["id"] for p in state["players"])
-    for p in state["players"]:
-        if p["table"]: continue
-        matches = [t for t in state["tables"] if t["pit"] == p["pit"] and t["status"] == "open"
-                   and t["occupied"] < t["capacity"] and t["minimum"] <= p["budget"]]
-        if matches:
-            t = min(matches,key=lambda t:(t["occupied"]/t["capacity"],t["id"]))
-            p.update(table=t["id"],seated=state["minute"])
-            t["occupied"] += 1
-            state["served"] += 1
-            record(state,"SEATED",p["id"],t["id"])
+    seat_waiting_guests(state)
     state["observed_arrivals"] = [v for v in state["observed_arrivals"] if v["minute"] > state["minute"]-10]
     state["observed_departures"] = [v for v in state["observed_departures"] if v > state["minute"]-10]
     state["seq"] += 1

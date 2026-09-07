@@ -6,20 +6,21 @@
   function install(request) {
   const host = window, doc = host.document;
   const storageKey = 'smart-casino-floor-tour-v1';
-  if (host.casinoFloorTour) { host.casinoFloorTour.launch(request); return; }
+  const tourVersion='one-click-1';
+  if (host.casinoFloorTour?.version===tourVersion) { host.casinoFloorTour.launch(request); return; }
+  const previousTour=doc.getElementById('casino-guided-tour');
+  previousTour?.querySelector('.tour-close')?.click();
+  previousTour?.remove();
   const visible = el => !!el && el.getClientRects().length > 0;
   const text = (selector, label) => [...doc.querySelectorAll(selector)].find(el =>
     visible(el) && el.textContent.trim() === label);
   const button = label => text('button', label);
   const heading = label => text('h4', label);
-  const field = label => [...doc.querySelectorAll('textarea,input')].find(el =>
-    visible(el) && el.getAttribute('aria-label') === label);
   const tab = label => text('[role="tab"]', label);
-  const block = el => el?.closest('[data-testid="stForm"]') || el;
   const steps = [
     {title:'Welcome to your floor workspace', label:'Start with the live picture',
-      body:'Turn a floor signal into a reviewed action. This short tour follows the real controls from live conditions to planning, dispatch, and results.',
-      hint:'Use Next to explore. Only your own clicks on scenario or action buttons change the demo.',
+      body:'Turn a floor signal into a reviewed action. This short tour follows the real controls from live conditions to suggestions, approval, and results.',
+      hint:'Use Next to explore. Only your own clicks on scenario or Approve buttons change the demo.',
       target:() => doc.querySelector('.hero'), section:'Floor & scenarios'},
     {title:'Read the room', label:'1 · Explore the live map',
       body:'Click a table to inspect its seats, minimum bet, and assigned dealer. Use Map layer to switch between occupancy, queue pressure, and modeled Theo.',
@@ -29,31 +30,15 @@
       body:'Click Dining group arrives in the sidebar to add a group-arrival signal and more demand in the main pit. Watch the queue and recommendations update.',
       hint:'Optional: this changes the local simulation. You can also select Next to continue without triggering it.',
       target:() => button('Dining group arrives'), sidebar:true},
-    {title:'Tell the floor what success looks like', label:'3 · Describe your goal',
-      body:'Use the English example or enter your own goal, then click Interpret goal. The fields on the right show the constraints to review.',
-      hint:'No API key? The displayed example works in template mode. For a follow-up, enter “Exclude B08” to keep previous constraints and exclude that table.',
-      target:() => block(field('Operational goal')), section:'Floor & scenarios'},
-    {title:'Keep the constraints in your hands', label:'4 · Evaluate feasible scenarios',
-      body:'Review the area, horizon, wait target, additional dealers, and VIP protection. Click Evaluate feasible scenarios to compare options using the same demand assumptions.',
-      hint:'A target may be unreachable. The system will explain this rather than silently relax your constraints.',
-      target:() => block(button('Evaluate feasible scenarios')), section:'Floor & scenarios'},
-    {title:'Compare before you act', label:'5 · Choose a scenario',
-      body:'After evaluating, use Scenario to preview to compare keeping the current setup, opening a table, or changing a minimum. Check wait, queue, Theo, and extra cost.',
-      hint:'Select an action scenario, then click Create action for review. Creating a task does not execute it. If no results are shown yet, evaluate the form above first.',
-      target:() => button('Create action for review') || button('Evaluate feasible scenarios'), section:'Floor & scenarios'},
-    {title:'Look 15 or 30 minutes ahead', label:'6 · Preview the future floor',
-      body:'Switch Map time to +15 min or +30 min to preview your selected scenario. Return to Now to see the live floor.',
-      hint:'Evaluate a scenario first. Forecasts are saved projections, and old plans are marked when conditions change.',
-      target:() => text('[data-testid="stWidgetLabel"] p','Map time')?.closest('[data-testid="stRadio"]'), section:'Floor & scenarios'},
-    {title:'Give the action an owner', label:'7 · Approve, then dispatch',
-      body:'In Action center, choose an owner and click Approve & assign. Review the accepted task, then click Dispatch to floor when ready.',
-      hint:'The tour never approves or dispatches for you. If the view is empty, create an action from a plan or try the dining-group scenario.',
-      target:() => heading('Every recommendation has an owner'), section:'Action center'},
-    {title:'Wait for confirmation, then measure', label:'8 · Follow the outcome',
-      body:'A dispatched task moves from EXECUTING to OBSERVING only after a floor confirmation. Results are recorded at +5 and +15 demo minutes; the task closes after the final observation.',
-      hint:'At 10× speed, those observations take about 30 and 90 seconds. Resource changes can invalidate a plan; stale telemetry pauses new actions.',
-      target:() => heading('Every recommendation has an owner'), section:'Action center'},
-    {title:'See the evidence behind the decision', label:'9 · Review and learn',
+    {title:'Approve a suggestion', label:'3 · One click to apply',
+      body:'Open Action center and choose a suggestion: add a dealer and open a table, or adjust a busy table’s minimum. Click Approve to apply it directly.',
+      hint:'The tour never approves for you. If the view is empty, try the dining-group scenario and wait for a recommendation.',
+      target:() => heading('Suggestions for your floor'), section:'Action center'},
+    {title:'Wait for confirmation, then measure', label:'4 · Follow the outcome',
+      body:'An approved suggestion applies within a few seconds. An opening adds seats and seats waiting guests. Watch Guests waiting and Estimated wait, and check the confirmed before/after values on the card.',
+      hint:'Minimum changes appear directly on the table. They may change demand without shortening the queue. Follow-up observations are saved automatically; stale telemetry pauses approvals.',
+      target:() => heading('Suggestions for your floor'), section:'Action center'},
+    {title:'See the evidence behind the decision', label:'5 · Review and learn',
       body:'Evidence & learning shows current staff, physical events, saved plans, and forecast errors. Compare predictions with later observations and check for data gaps.',
       hint:'You are ready to explore. Replay this tour anytime using Start guided tour in the sidebar.',
       target:() => heading('Streaming evidence'), section:'Evidence & learning'}
@@ -169,7 +154,7 @@
   new host.MutationObserver(records => {
     if(records.some(record => !root.contains(record.target))) schedule();
   }).observe(doc.body,{childList:true,subtree:true});
-  host.casinoFloorTour={launch};
+  host.casinoFloorTour={launch,version:tourVersion};
   launch(request);
   }
   const script=window.parent.document.createElement('script');

@@ -20,7 +20,7 @@ docker compose up --build -d
 
 此次本机验收采用前一种方式，外部 Python 基础镜像元数据请求曾长时间无响应；标准联网构建没有在此次环境中完成验证。开发覆盖文件依赖本机已有 `smart-casino-floor-dashboard` 和 `smart-casino-floor-data-producer` 镜像，不能单独用于全新机器。
 
-模拟时钟默认 **10 倍速**：1 个模拟分钟约 6 秒。开桌准备约 12 秒；5 分钟效果观察约 30 秒，15 分钟约 90 秒。页面自动刷新独立于聊天。
+模拟时钟默认 **10 倍速**：1 个模拟分钟约 6 秒。一键批准直接在模拟器应用（界面通常几秒后收到流回执）；5 分钟效果观察约 30 秒，15 分钟约 90 秒。页面自动刷新独立于聊天。
 
 ## 建议验收顺序
 
@@ -28,30 +28,28 @@ docker compose up --build -d
 
 - 首次访问自动显示英文引导；侧栏 **Start guided tour** 可随时重新开始。
 - 使用 **Next / Back / Skip tour**，或按 Escape 关闭。完成／跳过后，同一浏览器不会重复自动弹出。
-- 引导会高亮当前控件并滚动定位，覆盖地图、客流场景、目标解析、约束、方案比较、未来预览、审批派发、效果观察与证据。
+- 当前简化引导共 6 步，覆盖欢迎、地图、客流场景、审批派发、效果观察与证据；高级规划默认折叠，不再纳入引导。
 - 实时刷新和正常表单操作不会重置引导进度；引导本身不会触发场景、批准或派发任务。
 - “Give the floor a goal”的默认示例、追问示例与错误提示均为英文。
 
-### A. 目标、预演与执行
+### A. 自动建议与一键批准
 
-1. 侧栏点 **Reset floor scenario**，等新场景显示 LIVE。
-2. 点 **Dining group arrives**，看到主厅排队和餐饮业务信号。
-3. 使用地图下方的英文示例：`For the next 30 minutes, keep the main floor wait within 5 minutes, with no additional staff. Keep VIP minimums unchanged.`
-4. 点 **Interpret goal**，检查主厅、30 分钟、5 分钟等待目标、额外人员 0、保护 VIP。
-5. 追加 `Exclude B08`，检查排除桌台新增 `bac_08`，其他约束保留。
-6. 点 **Evaluate feasible scenarios**，比较保持现状、开桌、调整最低投注额。结果可能显示无法满足目标，系统不得自动放宽约束。
-7. 选择一个可行的开桌或调价方案，地图切到 +15 / +30 分钟。低／高需求值是情景范围，不是统计置信区间。
-8. 点 **Create action for review**。如果已有同桌台的自动任务，直接在 Action center 检查该任务，或拒绝旧任务后重新评估。
-9. 在 **Action center** 选择负责人，点 **Approve & assign**，再点 **Dispatch to floor**。
-10. 观察 EXECUTING → OBSERVING，桌台状态和之后的入座／投注配置随现场回执改变。五分钟后查看观测，十五分钟后自动关闭，或五分钟后人工关闭。
+1. 点 **Reset floor scenario**，等 LIVE 后点 **Dining group arrives**。
+2. 观察 **Guests waiting** 与 **Estimated wait** 上升，顶部提示 Action center 有建议。
+3. 进入 **Action center**，应看到开桌增员、热门桌提高最低限额等可行建议。
+4. 点开桌建议的 **Approve**。不需要选择负责人，也不需要 Execute；几秒后显示 Applied，地图桌台开放、排队人数减少。
+5. 检查卡片记录的现场生效前／后排队人数与预计等待时间。人员自动分配，资源仍须真实可用。
+6. 点调价建议的 **Approve**，确认桌台实际最低限额改变。提高限额不一定减少排队，界面不得承诺必然改善。
+7. +5／+15 模拟分钟后的观察会自动保存，不需要继续点击。
 
-### B. 资源变化与重新规划
+顶部 Estimated wait 根据队列和开放容量估算；实际已等待时长保留在 Details & history。高级目标、约束和预演仍可在 Advanced planning 中展开。
 
-1. Reset 场景，生成开桌方案并创建任务、批准，但先不派发。
-2. 点 **Reassign relief dealers**。
-3. 任务变为 EXPIRED；方案显示人员不可用的原因。
-4. 查看自动生成的替代方案，它应保留原约束，无可用人员时不能声称开桌可执行。
-5. 已派发动作在准备阶段发生同样变化时，应收到失败回执，不能误报桌台已开放。
+### B. 资源变化与数据检查
+
+1. 有开桌建议但尚未批准时，点 **Reassign relief dealers**。
+2. 不可行的旧建议应失效，不能虚构可用人员；调价建议仍按各自条件判断。
+3. 批准与模拟器消费之间若发生资源丢失，应失败而不是误报成功。
+4. 重复点击批准，或服务重启后重试，同一命令最多应用一次。
 
 ### C. 数据中断与恢复
 
@@ -87,6 +85,8 @@ docker compose up --build -d
 - 初始化脚本记录迁移版本；重复启动不会重建或清空行动历史。首次升级只重建原有 floor 派生视图。
 
 ## 验证命令
+
+当前简化流程新增 6 项单元检查（总计 31 项），真实流验证见 `tests/live_quick_approval.py` 和 `docs/QUICK_APPROVAL_RESULTS.json`。
 
 此次已通过 25 项单元测试、15 项真实链路验收检查，以及运营页／玩家分析页回归。浏览器已验证地图点选、未来时间切换、目标追问和页面导航。
 

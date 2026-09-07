@@ -14,8 +14,8 @@ Version 2.0 adds an operations action center, constrained scenario planning, an 
 | --- | --- |
 | **Live floor** | Inspect actual simulated seats, queues, table minimums, and dealer assignments across main baccarat, entry baccarat, VIP, blackjack, and slots. Switch occupancy, queue-pressure, and modeled-Theo layers. |
 | **Future floor** | Compare keeping the current setup, opening a reserve table, or changing a table minimum. Preview the selected scenario at +15 / +30 minutes. |
-| **Goal and constraints** | Set the area, horizon, wait target, additional staff allowance, VIP protection, excluded tables, and priority. Review interpreted fields before evaluating. |
-| **Action center** | Create a task, assign an owner, approve it, and explicitly dispatch it. The simulator must confirm execution before the task enters observation. |
+| **Goal and constraints** | Expand **Advanced planning** to set the area, horizon, wait target, additional staff allowance, VIP protection, excluded tables, and priority. This form is collapsed by default. |
+| **Action center** | Demand automatically creates suggestions. Click **Approve** once to apply an opening or minimum change; staff is assigned automatically. Physical confirmation updates the card and live metrics. |
 | **Replanning** | Resource loss, significant queue changes, and expiry invalidate affected plans. Replacement plans retain constraints and require fresh approval. |
 | **Evidence and learning** | Inspect physical events, decision history, +5 / +15 minute observations, and saved forecast errors. Data gaps and intervening actions limit comparisons. |
 | **Guided tour** | A first-visit English walkthrough highlights the real controls. Replay it with **Start guided tour**; Back, Next, Skip, and Escape are supported. |
@@ -35,12 +35,12 @@ The starting floor has **24 baccarat tables, 4 blackjack tables, and 8 slot mach
 2. **Kafka** carries four active input streams: `operational_events`, `gaming_events`, `fnb_events`, and `hotel_events`. Compose also creates two reserved recommendation topics; the current ML writeback uses SQL, not those topics.
 3. **RisingWave** continuously maintains the latest floor snapshot and current table / pit state. The operations service polls `mv_ops_latest_snapshot` every second. It does not bypass RisingWave by reading the simulator's state file.
 4. **The operations service** evaluates candidates, checks resource and policy constraints, tracks approvals, and records plans, tasks, commands, and observations in a **SQLite WAL ledger**. It serves the Streamlit operations workspace through HTTP.
-5. **The manager** approves and then dispatches a specific action. The simulator polls `/commands`, validates the request, prepares the action, and applies it. Receipts return inside streamed floor snapshots through **Kafka → RisingWave → operations service**. Dispatch alone is not proof of execution.
+5. **The manager** clicks **Approve** on a suggestion. This queues an immediate demo action. The simulator polls `/commands`, validates the request, assigns staff when needed, and applies it without a separate preparation delay. Receipts return inside streamed floor snapshots through **Kafka → RisingWave → operations service**. The UI shows Applying until the streamed receipt confirms success.
 
-The task lifecycle is:
+The one-click task lifecycle is (the older accept/execute API remains compatible):
 
 ```text
-PENDING → ACCEPTED → EXECUTING → OBSERVING → CLOSED
+PENDING → EXECUTING → OBSERVING → CLOSED
 ```
 
 Rejection, cancellation, expiry, and execution failure are recorded separately. The backend rechecks freshness, table version, staff availability, conflicts, limits, and cooldowns. Command IDs and persisted receipts prevent duplicate application on retries. The dashboard refreshes the operations workspace every three seconds; background processing continues independently of page navigation and chat.
@@ -114,22 +114,21 @@ For a code or configuration update, use the appropriate `up` command above. `doc
 
 ## Try the workflow
 
-1. Open **Start guided tour**, or follow the steps below. The tour only navigates and explains; it never approves or dispatches an action for you.
-2. Click **Reset floor scenario**, wait for **LIVE**, then click **Dining group arrives** to introduce a main-pit demand signal.
-3. Under **Give the floor a goal**, use the English example and click **Interpret goal**:
+1. Click **Reset floor scenario**, wait for **LIVE**, then click **Dining group arrives**.
+2. Guests waiting and **Estimated wait** increase as demand exceeds available seats. A banner points to suggestions in **Action center**.
+3. Open **Action center**. The demo automatically offers **Add a dealer & open B07/B08** and **Raise a busy table's minimum** when feasible. A lower-minimum suggestion can appear when an underused table can serve budget-constrained guests.
+4. Click **Approve** once. There is no owner selector or separate Execute step. Openings add a qualified available dealer and seats; changes are confirmed through Kafka and RisingWave, typically within a few seconds.
+5. Check the card's confirmed before/after queue and estimated-wait values, and the live map. A minimum change displays its old and new limits; it may affect demand without reducing waiting.
 
-   > For the next 30 minutes, keep the main floor wait within 5 minutes, with no additional staff. Keep VIP minimums unchanged.
+**Estimated wait** is a demo queue-size / seat-turnover estimate. It updates immediately when capacity changes. Elapsed queue age remains a separate metric in action details; it is not artificially reset when a table opens. Live totals continue changing as new guests arrive.
 
-4. Check **Confirm constraints**. For a follow-up, enter **Exclude B08** and interpret again; existing constraints remain in place.
-5. Click **Evaluate feasible scenarios**, compare the results, and select **Scenario to preview**. Use **Map time** to inspect +15 / +30 minutes. An unmet wait target is shown explicitly and does not cause constraints to be relaxed automatically.
-6. Select a feasible action and click **Create action for review**. In **Action center**, choose an owner, click **Approve & assign**, and then **Dispatch to floor**. An existing automatic task can also be reviewed there.
-7. Watch execution confirmation and +5 / +15 minute observations. Use **Evidence & learning** to inspect events and forecast error reviews.
+Advanced goal parsing, manual constraints, and scenario previews are retained under the collapsed **Advanced planning** section. They are optional and are skipped by the simplified tour.
 
-The simulation runs at **10× speed**: one demo minute takes about six real seconds. Opening preparation takes about 12 seconds; the two observation intervals take about 30 and 90 seconds after application. Plans have a ten-demo-minute approval window, so generate a fresh plan if a walkthrough takes longer.
+The simulation runs at **10× speed**. Follow-up observations are saved at +5 / +15 demo minutes (about 30 / 90 real seconds); no further user action is required. Automatic suggestions have a 30-demo-minute approval window and are withdrawn if resources disappear or queue pressure eases.
 
-Other scenarios exercise resource loss and telemetry interruption. **Reassign relief dealers** can invalidate an opening plan. **Interrupt telemetry** stops telemetry; after 15 seconds the last known values remain visible while new planning, approval, and dispatch are paused. **Resume telemetry** restores the stream.
+**Reassign relief dealers** and **Interrupt telemetry** exercise unavailable resources and stale data. Approve cannot bypass those checks. **Resume telemetry** restores the stream.
 
-[Detailed acceptance scenarios and implementation limits](docs/V2_ACCEPTANCE.md)
+[Detailed acceptance scenarios](docs/V2_ACCEPTANCE.md) · [One-click live verification](docs/QUICK_APPROVAL_RESULTS.json)
 
 ## AI capabilities
 
@@ -179,7 +178,7 @@ The SQL chat store defaults to RisingWave. `dashboard/chat_store.py` also suppor
 | `mv_high_roller_radar`, `mv_theo_by_tier`, `mv_dashboard_stats` | Retained player analytics |
 | `mv_table_live_load`, `mv_table_recommendations` | Retained SQL floor signals joined with streamed seat / minimum state; operations tasks are managed separately |
 
-The operational **wait** metric is the average elapsed queue age of guests currently waiting, rather than an end-to-end service-level guarantee. Open capacity excludes closed and preparing tables. Scenario "served" and queue-departure counts are floor-wide; the wait, queue, and Theo comparison metrics refer to the selected pit.
+The stored **wait** metric is average elapsed queue age. The primary **Estimated wait** KPI uses each pit's queue size × modeled session duration / open seats; the floor total is weighted by queued guests. Neither is an end-to-end service-level guarantee. Open capacity excludes closed and preparing tables. Scenario "served" and queue-departure counts are floor-wide; the wait, queue, and Theo comparison metrics refer to the selected pit.
 
 **Theoretical Win (Theo)** is modeled expected gaming win, not realized profit:
 
@@ -228,7 +227,9 @@ The active Compose entrypoint is `floor_simulator.py`; the earlier producer scri
 
 ## Validation and limits
 
-The 2.0 validation record includes **25 unit tests**, **15 live integration checks**, operations / analytics page smoke checks, and browser checks for the English goal flow and responsive tour. Live checks cover execution receipts, duplicate dispatch, restart recovery, staff loss, stale telemetry, automatic opportunities, and forecast review.
+The simplified workflow adds six unit checks (31 total) and `tests/live_quick_approval.py` for automatic suggestions, single approval, immediate streamed effects, and duplicate prevention. Its latest result is in `docs/QUICK_APPROVAL_RESULTS.json`.
+
+The original 2.0 validation record includes **25 unit tests**, **15 live integration checks**, operations / analytics page smoke checks, and browser checks for the English goal flow and responsive tour. Live checks cover execution receipts, duplicate dispatch, restart recovery, staff loss, stale telemetry, automatic opportunities, and forecast review.
 
 ```bash
 # Offline domain and ledger tests; no services required.

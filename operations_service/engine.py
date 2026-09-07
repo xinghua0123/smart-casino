@@ -57,7 +57,7 @@ class Engine:
         self.db.commit()
         return plan
 
-    def task_from_plan(self,plan_id,candidate_id,owner="Mei Wong"):
+    def task_from_plan(self,plan_id,candidate_id,owner="Pit Manager"):
         self.require_fresh()
         plan=self.get("plan",plan_id)
         if not plan: raise ValueError("Plan not found")
@@ -89,11 +89,12 @@ class Engine:
     def mutate_task(self,tid,operation,owner=None,reason=None):
         task=self.get("task",tid)
         if not task: raise ValueError("Task not found")
-        if operation in ("accept","execute"):
+        if operation in ("approve","accept","execute"):
             self.require_fresh()
             target="ACCEPTED" if operation=="accept" else "EXECUTING"
-            if task["status"]==target or operation=="execute" and task["command_id"]: return task
-            if task["status"]!=("PENDING" if operation=="accept" else "ACCEPTED"): raise ValueError("Invalid task transition")
+            if task["status"]==target or operation in ("approve","execute") and task["command_id"]: return task
+            allowed=("PENDING","ACCEPTED") if operation=="approve" else ("PENDING",) if operation=="accept" else ("ACCEPTED",)
+            if task["status"] not in allowed: raise ValueError("Invalid task transition")
             if task["run_id"]!=self.snapshot["run_id"] or self.snapshot["minute"]>task["expires"]: raise ValueError("Task expired")
             error=validate_action(self.snapshot,task["action"],task["constraints"],task["table_version"])
             if error: raise ValueError(error)
@@ -104,8 +105,13 @@ class Engine:
             if owner:
                 if owner not in ("Mei Wong","Alex Chan","Pit Manager"): raise ValueError("Unknown operator")
                 task["owner"]=owner
-            if operation=="execute": task["command_id"]=task["id"]
-            self.transition(task,target,"Manager approved" if operation=="accept" else "Command queued; waiting for physical preparation and telemetry acknowledgement")
+            if operation in ("approve","execute"):
+                task["command_id"]=task["id"]
+                task["immediate"]=operation=="approve"
+            if operation=="approve":
+                task["owner"]="Pit Manager"
+                task["approved_before"]=metrics(self.snapshot,task["constraints"]["pit"])
+            self.transition(task,target,"Approved; applying to the live demo floor" if operation=="approve" else "Manager approved" if operation=="accept" else "Command queued; waiting for physical preparation and telemetry acknowledgement")
         elif operation in ("reject","cancel"):
             if task["status"] not in ("PENDING","ACCEPTED"): raise ValueError("Only unexecuted tasks can be rejected or cancelled")
             if not reason or not reason.strip(): raise ValueError("A reason is required")
@@ -122,7 +128,7 @@ class Engine:
         if self.fresh():
             for t in self.all("task"):
                 if t["status"]=="EXECUTING":
-                    commands.append(dict(id=t["command_id"],run_id=t["run_id"],expires=t["expires"],action=t["action"],constraints=t["constraints"],table_version=t["table_version"]))
+                    commands.append(dict(id=t["command_id"],run_id=t["run_id"],expires=t["expires"],action=t["action"],constraints=t["constraints"],table_version=t["table_version"],immediate=t.get("immediate",False)))
         return dict(commands=commands,controls=[c for c in reversed(self.all("control")) if not c["done"]])
 
     def scenario(self,kind,table=None,request_id=None):
@@ -157,7 +163,9 @@ class Engine:
                 if receipt["status"]=="APPLIED":
                     task["effective"]=receipt["minute"]
                     task["effective_metrics"]=metrics(state,task["constraints"]["pit"])
-                    self.transition(task,"OBSERVING","Physical execution confirmed by the Kafka → RisingWave stream")
+                    task["impact"]=receipt.get("impact")
+                    self.transition(task,"OBSERVING","Applied to floor; tracking the results")
+                    self.note("Action applied",task["title"],task["plan_id"])
                 elif receipt["status"]=="FAILED": self.transition(task,"FAILED",receipt["reason"])
             if task["status"] in ("PENDING","ACCEPTED"):
                 reason=None
@@ -213,17 +221,61 @@ class Engine:
 
     def generate_opportunity(self):
         pit="main"
-        if metrics(self.snapshot,pit)["queue"]<4: return
-        tasks=[t for t in self.all("task") if t["run_id"]==self.snapshot["run_id"] and t["constraints"]["pit"]==pit]
-        if any(t["status"] in ACTIVE or self.snapshot["minute"]-(t["closed"] or t["created"])<10 for t in tasks): return
-        plan=create_plan(self.snapshot,DEFAULT_CONSTRAINTS,"Queue pressure: automatic operational opportunity")
-        plan["snapshot_metrics"]={p:metrics(self.snapshot,p) for p in PITS}
-        best=next((c for c in plan["candidates"] if c["feasible"] and c["action"]),None)
+        state=self.snapshot
+        queue=metrics(state,pit)["queue"]
+        tasks=[t for t in self.all("task") if t["run_id"]==state["run_id"] and t["constraints"]["pit"]==pit]
+        if queue<4:
+            for t in tasks:
+                if t.get("automatic") and t["status"]=="PENDING":
+                    self.transition(t,"EXPIRED","Queue pressure has eased; suggestion withdrawn")
+            return
+        # A manually planned action keeps its chosen scope; automatic suggestions
+        # may coexist as alternatives but never reserve staff until approved.
+        if any(not t.get("automatic") and t["status"] in ACTIVE for t in tasks): return
+        kinds=("OPEN_TABLE","RAISE_MINIMUM","LOWER_MINIMUM")
+        blocked={t.get("suggestion_kind",t["action"]["kind"]) for t in tasks
+                 if t["status"] in ACTIVE or t["status"] in ("CLOSED","REJECTED","CANCELLED")
+                 and state["minute"]-(t["closed"] or t["created"])<10}
+        if all(k in blocked for k in kinds): return
+        # No need to re-simulate missing alternatives on every telemetry tick.
+        checkpoint=self.get("opportunity","latest")
+        if checkpoint and checkpoint["run_id"]==state["run_id"] and state["minute"]-checkpoint["minute"]<1: return
+        self.put("opportunity",dict(id="latest",run_id=state["run_id"],minute=state["minute"]))
+        constraints={**DEFAULT_CONSTRAINTS,"extra_staff":1}
+        plan=create_plan(state,constraints,"Automatic suggestions for main-floor demand")
+        plan["snapshot_metrics"]={p:metrics(state,p) for p in PITS}
+        tables={t["id"]:t for t in state["tables"]}
+        occupied={t["action"]["table"] for t in tasks if t["status"] in ACTIVE}
+        choices={}
         baseline=next(c for c in plan["candidates"] if not c["action"])
-        if not best or best["metrics"]["queue"]>=baseline["metrics"]["queue"] and best["metrics"]["wait"]>=baseline["metrics"]["wait"]: return
+        for c in plan["candidates"]:
+            a=c["action"]
+            if not c["feasible"] or not a or a["table"] in occupied: continue
+            table=tables[a["table"]]
+            kind=a["kind"] if a["kind"]=="OPEN_TABLE" else "RAISE_MINIMUM" if a["minimum"]>table["minimum"] else "LOWER_MINIMUM"
+            if kind in blocked or kind in choices: continue
+            if kind=="RAISE_MINIMUM" and table["occupied"]/table["capacity"]<.85: continue
+            if kind=="LOWER_MINIMUM" and (table["occupied"]/table["capacity"]>=.6 or c["metrics"]["queue"]>=baseline["metrics"]["queue"]): continue
+            choices[kind]=c
+        if not choices: return
         self.put("plan",plan)
-        self.task_from_plan(plan["id"],best["id"])
-        self.note("Queue pressure: action ready for review",best["label"],plan["id"])
+        for kind,c in choices.items():
+            try: t=self.task_from_plan(plan["id"],c["id"])
+            except ValueError: continue
+            table=tables[c["action"]["table"]]
+            short=table["id"].replace("bac_","B")
+            if kind=="OPEN_TABLE":
+                title=f"Add a dealer & open {short}"
+                detail=f"Add {table['capacity']} seats. Staff is assigned automatically; waiting guests can be seated immediately."
+            elif kind=="RAISE_MINIMUM":
+                title=f"Raise {short} minimum to HK${c['action']['minimum']:g}"
+                detail=f"Busy table: {table['occupied']}/{table['capacity']} seats. Current minimum HK${table['minimum']:g}. This changes demand and value; it may not shorten the queue."
+            else:
+                title=f"Lower {short} minimum to HK${c['action']['minimum']:g}"
+                detail="Make spare seats accessible to more waiting guests."
+            t.update(automatic=True,suggestion_kind=kind,title=title,description=detail,expires=state["minute"]+30)
+            self.put("task",t)
+        self.note("Suggestions ready in Action center","Approve an opening or a minimum change to apply it directly to the demo floor.",plan["id"])
 
     def overview(self):
         plans=self.all("plan",limit=30)

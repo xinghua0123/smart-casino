@@ -76,7 +76,17 @@ def metrics(state, pit=None):
     seated = sum(t["occupied"] for t in tables)
     wait = sum(max(0,state["minute"]-p["arrived"]) for p in queue)/max(1,len(queue))
     theo = sum(t["occupied"]*t["minimum"]*1.4*EDGES[t["game"]]*1.5*60 for t in tables)
-    return dict(queue=len(queue), wait=round(wait,2), seated=seated, capacity=capacity,
+    # Queue-size / seat-turnover estimate, separate from elapsed queue age.
+    estimate=0.0
+    for group in {p["pit"] for p in queue}:
+        n=sum(p["pit"]==group for p in queue)
+        seats=sum(t["capacity"] for t in tables if t["pit"]==group and t["status"]=="open")
+        if not seats:
+            estimate=None
+            break
+        estimate+=n*n*state.get("session_minutes",18)/seats
+    estimate=round(estimate/max(1,len(queue)),2) if estimate is not None else None
+    return dict(queue=len(queue), wait=round(wait,2), estimated_wait=estimate, seated=seated, capacity=capacity,
                 theo_total=round(sum(t["theo"] for t in tables),2),
                 labor_cost_total=round(sum(v for p,v in state.get("cost_totals",{}).items() if pit is None or p==pit),2),
                 occupancy=round(seated/max(1,capacity),3), theo_hour=round(theo,2), open_tables=sum(t["status"]=="open" for t in tables))

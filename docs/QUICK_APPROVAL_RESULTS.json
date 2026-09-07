@@ -1,0 +1,43 @@
+{
+  "passed": [
+    "live telemetry ready",
+    "fresh demo reset",
+    "automatic opening suggestion",
+    "automatic busy-table minimum suggestion",
+    "one approval opens the table through the stream",
+    "confirmed queue and estimated wait decrease; no duplicate application",
+    "minimum suggestion remains independently actionable",
+    "one approval changes the actual table minimum"
+  ],
+  "opening_confirmation_seconds": 1.93,
+  "opening_impact": {
+    "before": {
+      "queue": 20,
+      "wait": 0.61,
+      "estimated_wait": 8.57,
+      "seated": 42,
+      "capacity": 42,
+      "theo_total": 82.1,
+      "labor_cost_total": 0.0,
+      "occupancy": 1.0,
+      "theo_hour": 6085.8,
+      "open_tables": 6
+    },
+    "after": {
+      "queue": 13,
+      "wait": 0.58,
+      "estimated_wait": 4.78,
+      "seated": 49,
+      "capacity": 49,
+      "theo_total": 82.1,
+      "labor_cost_total": 0.0,
+      "occupancy": 1.0,
+      "theo_hour": 7100.1,
+      "open_tables": 7
+    },
+    "previous_minimum": 100,
+    "minimum": 100,
+    "pit": "main"
+  },
+  "finished_at": "2026-09-07T10:45:28Z"
+}
