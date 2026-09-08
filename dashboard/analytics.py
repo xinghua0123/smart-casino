@@ -41,7 +41,6 @@ BASELINE = {
     "theo_per_5min": 7_500,        # ~5% blended house edge × 150K wagered
     "house_edge": 0.0500,          # 5.00% blended across the typical game mix
     "win_rate": 0.42,
-    "label": "vs demo baseline",
 }
 
 # House edge constants shown in the explanation card (must match 02_feature_mvs.sql)
@@ -357,19 +356,18 @@ def analytics_live():
         d_wagered = cur_wagered - BASELINE["wagered_per_5min"]
         d_theo = cur_theo - BASELINE["theo_per_5min"]
         d_edge = cur_edge - BASELINE["house_edge"]
-        lbl = BASELINE["label"]
 
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Recorded players", int(cur["active_players"]))
         c2.metric("Avg Bet", f"${cur_bet:,.0f}",
-                  delta=f"{'-' if d_bet < 0 else '+'}${abs(d_bet):,.0f} {lbl}" if abs(d_bet) >= 1 else None)
+                  delta=f"{'-' if d_bet < 0 else '+'}${abs(d_bet):,.0f}" if abs(d_bet) >= 1 else None)
         c3.metric("Wagered (latest snapshots)", f"${cur_wagered:,.0f}",
-                  delta=f"{'-' if d_wagered < 0 else '+'}${abs(d_wagered):,.0f} {lbl}" if abs(d_wagered) >= 1 else None)
+                  delta=f"{'-' if d_wagered < 0 else '+'}${abs(d_wagered):,.0f}" if abs(d_wagered) >= 1 else None)
         c4.metric("Theo (latest snapshots)", f"${cur_theo:,.0f}",
-                  delta=f"{'-' if d_theo < 0 else '+'}${abs(d_theo):,.0f} {lbl}" if abs(d_theo) >= 1 else None,
+                  delta=f"{'-' if d_theo < 0 else '+'}${abs(d_theo):,.0f}" if abs(d_theo) >= 1 else None,
                   help="Theoretical Win = Σ(bet × house_edge). Casino's expected profit from this window's play, independent of short-term luck.")
         c5.metric("Effective House Edge", f"{cur_edge:.2%}",
-                  delta=f"{d_edge:+.2%} {lbl}" if abs(d_edge) >= 0.0001 else None,
+                  delta=f"{d_edge:+.2%}" if abs(d_edge) >= 0.0001 else None,
                   delta_color="normal",
                   help="Blended house edge given the actual game mix being played. Higher = more profitable game mix.")
 
