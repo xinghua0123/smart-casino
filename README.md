@@ -126,7 +126,7 @@ Advanced goal parsing, manual constraints, and scenario previews are retained un
 
 The simulation runs at **10× speed**. Follow-up observations are saved at +5 / +15 demo minutes (about 30 / 90 real seconds); no further user action is required. Automatic suggestions have a 30-demo-minute approval window and are withdrawn if resources disappear or queue pressure eases.
 
-**Reassign relief dealers** and **Interrupt telemetry** exercise unavailable resources and stale data. Approve cannot bypass those checks. **Resume telemetry** restores the stream.
+**Dealer shortage · 3 tables** closes three running main-floor tables when their dealers become unavailable. Guests move to remaining seats or the queue; Action center recommends assigning qualified relief staff to reopen a table. One **Approve** restores seven seats. Use **Reset floor scenario** before switching between independent demos. Telemetry fault injection and reserve-staff controls remain backend test tools, outside the demo sidebar.
 
 [Detailed acceptance scenarios](docs/V2_ACCEPTANCE.md) · [One-click live verification](docs/QUICK_APPROVAL_RESULTS.json)
 
@@ -266,3 +266,9 @@ The generator writes both outputs next to its source and does not start any demo
 - [`2.0`](https://github.com/xinghua0123/smart-casino/tree/2.0): operations workflow, scenario planning, goal parsing, replanning, persistent execution observations, and English onboarding.
 
 [Implementation scope](docs/V2_PLAN.md) · [Acceptance and runbook](docs/V2_ACCEPTANCE.md)
+
+### Tour group departure demo
+
+Choose **Reset floor scenario → Tour group departs → Action center**. The simulated departing group leaves one guest per previously occupied main-floor table. With no queue and compatible spare seats, **Consolidate & release a dealer** moves the remaining guests, closes one quiet table, and releases its dealer on approval. The result shows unchanged seated guests, fewer open tables, higher seat occupancy, and more available dealers. Transfers preserve session timing and respect budgets, game type, and area; renewed queue pressure blocks consolidation. Minimum reductions remain conditional on budget-related queues and forecast improvement.
+
+Live check: `python3 tests/live_consolidation.py` (resets the local demo).

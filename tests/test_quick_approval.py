@@ -90,3 +90,21 @@ class QuickApprovalTests(unittest.TestCase):
         self.s['minute']+=1
         self.feed()
         self.assertFalse(any(t['status']=='PENDING' and t.get('suggestion_kind')=='OPEN_TABLE' for t in self.e.all('task')))
+
+    def test_dealer_shortage_alone_loses_capacity_and_approval_restores_it(self):
+        self.s=initial_state()
+        before=metrics(self.s,'main')
+        control(self.s,{'id':'absence','kind':'dealer_shortage'})
+        lost=metrics(self.s,'main')
+        self.assertEqual(lost['capacity'],before['capacity']-21)
+        self.assertGreater(lost['queue'],before['queue'])
+        self.feed()
+        task=self.suggestion('OPEN_TABLE')
+        self.assertIn('relief dealer & reopen',task['title'])
+        self.e.mutate_task(task['id'],'approve')
+        receive_command(self.s,self.e.commands()['commands'][0])
+        self.feed()
+        self.assertEqual(self.e.get('task',task['id'])['status'],'OBSERVING')
+        self.assertEqual(metrics(self.s,'main')['capacity'],lost['capacity']+7)
+        self.assertLess(metrics(self.s,'main')['queue'],lost['queue'])
+        self.assertLess(metrics(self.s,'main')['estimated_wait'],lost['estimated_wait'])

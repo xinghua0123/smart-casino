@@ -63,6 +63,10 @@ def forecast(snapshot, action=None, factor=1.0, horizon=30):
             if action and minute == (2 if action["kind"] == "OPEN_TABLE" else 1):
                 t = next(t for t in tables if t["id"] == action["table"])
                 if action["kind"] == "OPEN_TABLE": t["status"] = "open"
+                elif action["kind"] == "CONSOLIDATE_TABLE":
+                    t["status"]="closed"
+                    for p in players:
+                        if p["table"]==t["id"]: p.update(table=None,leave_at=None,arrived=minute)
                 else:
                     t["minimum"] = action["minimum"]
                     for p in players:
@@ -105,6 +109,9 @@ def create_plan(snapshot, values, goal="Manual constraints"):
             a=dict(kind="OPEN_TABLE",table=t["id"],dealer=dealer["id"] if dealer else None)
             candidates.append(dict(label=f"Open {t['id']}",action=a,reason=validate_action(snapshot,a,c,t["version"])))
         elif t["status"]=="open" and t["game"]!="slots":
+            if snapshot.get("signal") and snapshot["signal"]["kind"]=="TOUR_GROUP_DEPARTED" and snapshot["signal"]["expires"]>snapshot["minute"]:
+                a=dict(kind="CONSOLIDATE_TABLE",table=t["id"])
+                candidates.append(dict(label=f"Consolidate {t['id']} and release its dealer",action=a,reason=validate_action(snapshot,a,c,t["version"])))
             for low in sorted(set([max(t["minimum_floor"],t["minimum"]/2),min(t["maximum"],t["minimum"]*2)])):
                 if low == t["minimum"]: continue
                 a=dict(kind="SET_MINIMUM",table=t["id"],minimum=low)

@@ -86,7 +86,7 @@ def metrics(state, pit=None):
             break
         estimate+=n*n*state.get("session_minutes",18)/seats
     estimate=round(estimate/max(1,len(queue)),2) if estimate is not None else None
-    return dict(queue=len(queue), wait=round(wait,2), estimated_wait=estimate, seated=seated, capacity=capacity,
+    return dict(available_dealers=sum(d["status"]=="available" and any(t["game"] in d["skills"] for t in tables) for d in state["dealers"]), queue=len(queue), wait=round(wait,2), estimated_wait=estimate, seated=seated, capacity=capacity,
                 theo_total=round(sum(t["theo"] for t in tables),2),
                 labor_cost_total=round(sum(v for p,v in state.get("cost_totals",{}).items() if pit is None or p==pit),2),
                 occupancy=round(seated/max(1,capacity),3), theo_hour=round(theo,2), open_tables=sum(t["status"]=="open" for t in tables))

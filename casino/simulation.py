@@ -22,6 +22,30 @@ def control(state, command):
                                explanation="Group dining ended · assumed +1 arrival/min for 30 demo minutes")
         state["scenario"] = "Dining group / main-pit surge"
         record(state,"BUSINESS_SIGNAL","restaurant",state["signal"]["explanation"])
+    elif kind == "tour_departure":
+        departing=[]
+        for t in state["tables"]:
+            if t["pit"] == "main":
+                guests=[p for p in state["players"] if p["table"] == t["id"]]
+                departing.extend(p["id"] for p in guests[1:])
+        state["players"]=[p for p in state["players"] if p["id"] not in departing]
+        state["scenario"]="Tour group departs / main-pit demand drop"
+        state["signal"]=dict(kind="TOUR_GROUP_DEPARTED",pit="main",minute=state["minute"],expires=state["minute"]+30,extra_arrivals_per_minute=0,
+                             explanation=f"Tour group departed: {len(departing)} seated guests left the main floor")
+        record(state,"GROUP_DEPARTED","main",state["signal"]["explanation"])
+        seat_waiting_guests(state)
+    elif kind == "dealer_shortage":
+        affected = sorted((t for t in state["tables"] if t["pit"] == "main" and t["status"] == "open"), key=lambda t: (-t["occupied"], t["id"]))[:3]
+        for t in affected:
+            d = next(d for d in state["dealers"] if d["id"] == t["dealer"])
+            d.update(status="unavailable", table=None, version=d["version"]+1)
+            t.update(status="closed", dealer=None, occupied=0, closure_reason="dealer_shortage", cooldown_until=0, version=t["version"]+1)
+            for p in state["players"]:
+                if p["table"] == t["id"]:
+                    p.update(table=None, seated=None, arrived=state["minute"])
+            record(state,"DEALER_ABSENT",t["id"],"Dealer unavailable; table closed and guests need reassignment")
+        state["scenario"] = "Dealer shortage / main-pit capacity loss"
+        seat_waiting_guests(state)
     elif kind == "staff_shortage":
         for d in state["dealers"]:
             if d["status"] in ("available", "reserved"):
@@ -51,6 +75,21 @@ def control(state, command):
     state["control_receipts"] = state["control_receipts"][-200:]
 
 
+def consolidation_moves(state, table, constraints):
+    """Match less-flexible guests first; never evict anyone into a queue."""
+    targets=[t for t in state["tables"] if t["id"] != table["id"] and t["pit"] == table["pit"]
+             and t["game"] == table["game"] and t["status"] == "open" and t["id"] not in constraints["excluded"]]
+    free={t["id"]:t["capacity"]-sum(p["table"]==t["id"] for p in state["players"]) for t in targets}
+    moves=[]
+    for p in sorted((p for p in state["players"] if p["table"]==table["id"]),key=lambda p:p["budget"]):
+        matches=[t for t in targets if free[t["id"]]>0 and t["minimum"]<=p["budget"]]
+        if not matches: return None
+        target=max(matches,key=lambda t:(t["minimum"],-free[t["id"]],t["id"]))
+        free[target["id"]]-=1
+        moves.append((p,target))
+    return moves
+
+
 def validate_action(state, action, constraints, expected_version=None):
     t = next((t for t in state["tables"] if t["id"] == action.get("table")),None)
     if not t:
@@ -69,6 +108,16 @@ def validate_action(state, action, constraints, expected_version=None):
             return "Required dealer unavailable or not qualified"
         if d["extra"] and constraints["extra_staff"] < 1:
             return "Additional staff is forbidden"
+    elif action["kind"] == "CONSOLIDATE_TABLE":
+        if t["status"] != "open" or t["game"] == "slots" or t["pit"] == "vip":
+            return "Only running non-VIP table games may be consolidated"
+        if t["occupied"]/t["capacity"] >= .4 or metrics(state,t["pit"])["queue"]:
+            return "Consolidation requires low occupancy and no waiting guests"
+        d=next((d for d in state["dealers"] if d["id"]==t["dealer"]),None)
+        if not d or d["status"] != "assigned" or d["table"] != t["id"]:
+            return "Assigned dealer is unavailable"
+        if consolidation_moves(state,t,constraints) is None:
+            return "Not enough compatible seats to move every guest"
     elif action["kind"] == "SET_MINIMUM":
         if t["status"] != "open" or t["game"] == "slots":
             return "Only running table games may change minimum"
@@ -148,6 +197,19 @@ def advance(state, dt):
             else:
                 d.update(status="assigned",version=d["version"]+1)
                 t.update(status="open",dealer=d["id"])
+                t.pop("closure_reason",None)
+        elif a["kind"] == "CONSOLIDATE_TABLE":
+            error=validate_action(state,a,r["command"]["constraints"],r["command"]["table_version"])
+            if not error:
+                moves=consolidation_moves(state,t,r["command"]["constraints"])
+                for p,target in moves:
+                    p["table"]=target["id"]
+                    record(state,"GUEST_RELOCATED",p["id"],target["id"])
+                d=next(d for d in state["dealers"] if d["id"]==t["dealer"])
+                d.update(status="available",table=None,version=d["version"]+1)
+                t.update(status="closed",dealer=None,occupied=0)
+                r["relocated_guests"]=len(moves)
+                r["released_dealer"]=d["id"]
         elif t["status"] != "open":
             error = "Minimum change interrupted: table not running"
         else:
@@ -164,7 +226,8 @@ def advance(state, dt):
         if not error:
             seat_waiting_guests(state)
             r["impact"]=dict(before=before,after=metrics(state,t["pit"]),
-                             previous_minimum=previous_minimum,minimum=t["minimum"],pit=t["pit"])
+                             previous_minimum=previous_minimum,minimum=t["minimum"],pit=t["pit"],
+                             relocated_guests=r.get("relocated_guests",0),released_dealer=r.get("released_dealer"))
 
     left = []
     for p in state["players"]:

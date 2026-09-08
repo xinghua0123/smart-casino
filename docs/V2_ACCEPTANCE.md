@@ -46,16 +46,18 @@ docker compose up --build -d
 
 ### B. 资源变化与数据检查
 
-1. 有开桌建议但尚未批准时，点 **Reassign relief dealers**。
-2. 不可行的旧建议应失效，不能虚构可用人员；调价建议仍按各自条件判断。
+1. 点 **Reset floor scenario**，再点 **Dealer shortage · 3 tables**。
+2. 主厅营业座位减少 21 个；客人分流后产生排队。Action center 应出现 **Assign a relief dealer & reopen**。点 **Approve** 后恢复 7 个座位，排队人数和预计等待下降。人员不足时不能虚构可用人员。
 3. 批准与模拟器消费之间若发生资源丢失，应失败而不是误报成功。
 4. 重复点击批准，或服务重启后重试，同一命令最多应用一次。
 
 ### C. 数据中断与恢复
 
-1. 点 **Interrupt telemetry**，等待约 15 秒进入 STALE。
+以下为后端故障注入检查，不再作为侧栏演示场景。
+
+1. 通过 `/scenario` API 提交 `outage`，等待约 15 秒进入 STALE。
 2. 保留最后已知值，并阻止生成新计划、批准和派发；不把断流解释为零客流。
-3. 点 **Resume telemetry**，回到 LIVE。
+3. 通过 `/scenario` API 提交 `resume`，回到 LIVE。
 4. 观察时间段如存在中断，结果应标注数据缺口；历史命令不得重复执行。
 
 ### D. 证据、误差与已有功能
@@ -107,3 +109,11 @@ python3 -B tests/live_acceptance.py
 - 首版通过记录结果和预测误差支持后续学习，不自动训练或发布经营策略。
 - 操作人员是演示身份，尚无企业身份认证；当前 API 只映射到本机地址。
 - 真实 WDTS／CMS 接入、生产可用性和真实收益验证属于后续集成。
+
+## Tour group departs
+
+1. Reset the floor, then select **Tour group departs**. Main-floor occupied seats decrease.
+2. Open **Action center** and approve **Consolidate & release a dealer**.
+3. Confirm one fewer open table, one more available dealer, higher seat occupancy, and no newly queued or lost guests.
+4. If arrivals refill the floor before approval, unsafe consolidation must expire or fail; it must never report a successful transfer without compatible seats.
+5. A subsequent **Dining group arrives** can reuse released staff when an opening is recommended.

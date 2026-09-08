@@ -132,7 +132,7 @@ class Engine:
         return dict(commands=commands,controls=[c for c in reversed(self.all("control")) if not c["done"]])
 
     def scenario(self,kind,table=None,request_id=None):
-        if kind not in ("surge","reset","staff_shortage","restore_staff","outage","resume","close_table"): raise ValueError("Unknown scenario")
+        if kind not in ("surge","reset","tour_departure","dealer_shortage","staff_shortage","restore_staff","outage","resume","close_table"): raise ValueError("Unknown scenario")
         if kind=="close_table" and (not self.snapshot or table not in [t["id"] for t in self.snapshot["tables"]]): raise ValueError("Unknown table")
         cid=request_id or str(uuid.uuid4())
         existing=self.get("control",cid)
@@ -224,7 +224,8 @@ class Engine:
         state=self.snapshot
         queue=metrics(state,pit)["queue"]
         tasks=[t for t in self.all("task") if t["run_id"]==state["run_id"] and t["constraints"]["pit"]==pit]
-        if queue<4:
+        departure=bool(state.get("signal") and state["signal"]["kind"]=="TOUR_GROUP_DEPARTED" and state["signal"]["expires"]>state["minute"])
+        if queue<4 and not departure:
             for t in tasks:
                 if t.get("automatic") and t["status"]=="PENDING":
                     self.transition(t,"EXPIRED","Queue pressure has eased; suggestion withdrawn")
@@ -232,7 +233,7 @@ class Engine:
         # A manually planned action keeps its chosen scope; automatic suggestions
         # may coexist as alternatives but never reserve staff until approved.
         if any(not t.get("automatic") and t["status"] in ACTIVE for t in tasks): return
-        kinds=("OPEN_TABLE","RAISE_MINIMUM","LOWER_MINIMUM")
+        kinds=("OPEN_TABLE","RAISE_MINIMUM","LOWER_MINIMUM","CONSOLIDATE_TABLE") if departure else ("OPEN_TABLE","RAISE_MINIMUM","LOWER_MINIMUM")
         blocked={t.get("suggestion_kind",t["action"]["kind"]) for t in tasks
                  if t["status"] in ACTIVE or t["status"] in ("CLOSED","REJECTED","CANCELLED")
                  and state["minute"]-(t["closed"] or t["created"])<10}
@@ -248,12 +249,13 @@ class Engine:
         occupied={t["action"]["table"] for t in tasks if t["status"] in ACTIVE}
         choices={}
         baseline=next(c for c in plan["candidates"] if not c["action"])
-        for c in plan["candidates"]:
+        for c in sorted(plan["candidates"], key=lambda c: 0 if c["action"] and tables[c["action"]["table"]].get("closure_reason")=="dealer_shortage" else 1):
             a=c["action"]
             if not c["feasible"] or not a or a["table"] in occupied: continue
             table=tables[a["table"]]
-            kind=a["kind"] if a["kind"]=="OPEN_TABLE" else "RAISE_MINIMUM" if a["minimum"]>table["minimum"] else "LOWER_MINIMUM"
+            kind=a["kind"] if a["kind"] in ("OPEN_TABLE","CONSOLIDATE_TABLE") else "RAISE_MINIMUM" if a["minimum"]>table["minimum"] else "LOWER_MINIMUM"
             if kind in blocked or kind in choices: continue
+            if queue<4 and kind!="CONSOLIDATE_TABLE": continue
             if kind=="RAISE_MINIMUM" and table["occupied"]/table["capacity"]<.85: continue
             if kind=="LOWER_MINIMUM" and (table["occupied"]/table["capacity"]>=.6 or c["metrics"]["queue"]>=baseline["metrics"]["queue"]): continue
             choices[kind]=c
@@ -267,6 +269,12 @@ class Engine:
             if kind=="OPEN_TABLE":
                 title=f"Add a dealer & open {short}"
                 detail=f"Add {table['capacity']} seats. Staff is assigned automatically; waiting guests can be seated immediately."
+                if table.get("closure_reason")=="dealer_shortage":
+                    title=f"Assign a relief dealer & reopen {short}"
+                    detail=f"This table closed because its dealer became unavailable. Automatically assign qualified relief staff and restore {table['capacity']} seats."
+            elif kind=="CONSOLIDATE_TABLE":
+                title=f"Consolidate {short} & release a dealer"
+                detail=f"Move {table['occupied']} guest{'s' if table['occupied']!=1 else ''} to compatible seats in the same area, close this quiet table, and make its dealer available. No guest is sent to the queue."
             elif kind=="RAISE_MINIMUM":
                 title=f"Raise {short} minimum to HK${c['action']['minimum']:g}"
                 detail=f"Busy table: {table['occupied']}/{table['capacity']} seats. Current minimum HK${table['minimum']:g}. This changes demand and value; it may not shorten the queue."
@@ -275,7 +283,7 @@ class Engine:
                 detail="Make spare seats accessible to more waiting guests."
             t.update(automatic=True,suggestion_kind=kind,title=title,description=detail,expires=state["minute"]+30)
             self.put("task",t)
-        self.note("Suggestions ready in Action center","Approve an opening or a minimum change to apply it directly to the demo floor.",plan["id"])
+        self.note("Suggestions ready in Action center","Approve a recommendation to apply it directly to the demo floor.",plan["id"])
 
     def overview(self):
         plans=self.all("plan",limit=30)

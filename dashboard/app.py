@@ -63,7 +63,7 @@ with st.sidebar:
     st.divider()
     st.markdown('**Demo scenarios**')
     st.caption('10× clock · 1 demo minute = 6 real seconds. Actions affect this local simulation.')
-    for label,kind in [('Dining group arrives','surge'),('Reassign relief dealers','staff_shortage'),('Restore relief dealers','restore_staff'),('Interrupt telemetry','outage'),('Resume telemetry','resume'),('Reset floor scenario','reset')]:
+    for label,kind in [('Dining group arrives','surge'),('Dealer shortage · 3 tables','dealer_shortage'),('Tour group departs','tour_departure'),('Reset floor scenario','reset')]:
         if st.button(label,key='scenario_'+kind,use_container_width=True):
             if action('/scenario',{'kind':kind,'request_id':str(uuid.uuid4())}): st.success('Scenario queued')
     st.divider()
@@ -231,6 +231,13 @@ def render_actions(data):
                 delta=after.get('estimated_wait')-before.get('estimated_wait') if after.get('estimated_wait') is not None and before.get('estimated_wait') is not None else None
                 w.metric('Estimated wait · on application',wait_label(after.get('estimated_wait')),f"{delta:+.1f} min" if delta is not None else None,delta_color='inverse')
                 if t['action']['kind']=='SET_MINIMUM': st.success(f"Minimum updated: HK\\${impact['previous_minimum']:g} → HK\\${impact['minimum']:g}")
+                elif t['action']['kind']=='CONSOLIDATE_TABLE':
+                    st.success(f"Table closed · {impact['relocated_guests']} guest{'s' if impact['relocated_guests']!=1 else ''} relocated · 1 dealer released")
+                    a,b,c=st.columns(3)
+                    c.metric('Available dealers · on application',after['available_dealers'],after['available_dealers']-before['available_dealers'])
+                    a.metric('Open tables · on application',after['open_tables'],after['open_tables']-before['open_tables'])
+                    a.caption('Released dealer is available for a later opening.')
+                    b.metric('Seat occupancy · on application',f"{after['occupancy']:.0%}",f"{(after['occupancy']-before['occupancy'])*100:+.1f} pp")
                 else: st.success(f"Table opened · {after['capacity']-before['capacity']} seats added")
                 st.caption('Confirmed at application. Live totals continue to change as guests arrive and leave.')
             with st.expander('Details & history'):
@@ -267,7 +274,7 @@ def workspace():
     state_label='LIVE · '+str(data['age'])+'s old' if data['fresh'] else 'STALE · actions paused'
     st.markdown(f'<div class="hero"><div><div class="eyebrow">SMART CASINO / FLOOR OPERATIONS</div><h1>Decide ahead. Act with confidence.</h1><div class="small">{html.escape(s["scenario"])} · demo minute {s["minute"]:.1f} · 10× simulation</div></div><span class="badge">{state_label}</span></div>',unsafe_allow_html=True)
     with st.container():
-        if not data['fresh']: st.error('Telemetry is stale. Values below are the last observed state; new plans and dispatch are paused. Resume telemetry in the sidebar.')
+        if not data['fresh']: st.error('Telemetry is stale. Values below are the last observed state; new actions are paused until the live connection recovers.')
         if st.session_state.get('flash'): st.caption(st.session_state.pop('flash'))
     m=s['metrics']; cols=st.columns(5)
     for col,label,value in zip(cols,['Occupied seats','Guests waiting','Estimated wait','Open positions','Active actions'],[f"{m['seated']} / {m['capacity']}",m['queue'],wait_label(m.get('estimated_wait')),f"{m['open_tables']} / 36",sum(t['status'] in ('PENDING','ACCEPTED','EXECUTING','OBSERVING') for t in data['tasks'])]): col.metric(label,value)
