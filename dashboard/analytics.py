@@ -357,19 +357,30 @@ def analytics_live():
         d_theo = cur_theo - BASELINE["theo_per_5min"]
         d_edge = cur_edge - BASELINE["house_edge"]
 
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Recorded players", int(cur["active_players"]))
-        c2.metric("Avg Bet", f"${cur_bet:,.0f}",
-                  delta=f"{'-' if d_bet < 0 else '+'}${abs(d_bet):,.0f}" if abs(d_bet) >= 1 else None)
-        c3.metric("Wagered (latest snapshots)", f"${cur_wagered:,.0f}",
-                  delta=f"{'-' if d_wagered < 0 else '+'}${abs(d_wagered):,.0f}" if abs(d_wagered) >= 1 else None)
-        c4.metric("Theo (latest snapshots)", f"${cur_theo:,.0f}",
-                  delta=f"{'-' if d_theo < 0 else '+'}${abs(d_theo):,.0f}" if abs(d_theo) >= 1 else None,
-                  help="Theoretical Win = Σ(bet × house_edge). Casino's expected profit from this window's play, independent of short-term luck.")
-        c5.metric("Effective House Edge", f"{cur_edge:.2%}",
-                  delta=f"{d_edge:+.2%}" if abs(d_edge) >= 0.0001 else None,
-                  delta_color="normal",
-                  help="Blended house edge given the actual game mix being played. Higher = more profitable game mix.")
+        kpis = [
+            ("Recorded players", f"{int(cur['active_players']):,}", None, 0),
+            ("Avg Bet", f"${cur_bet:,.0f}", f"{'-' if d_bet < 0 else '+'}${abs(d_bet):,.0f}" if abs(d_bet)>=1 else None, d_bet),
+            ("Wagered (latest snapshots)", f"${cur_wagered:,.0f}", f"{'-' if d_wagered < 0 else '+'}${abs(d_wagered):,.0f}" if abs(d_wagered)>=1 else None, d_wagered),
+            ("Theo (latest snapshots)", f"${cur_theo:,.0f}", f"{'-' if d_theo < 0 else '+'}${abs(d_theo):,.0f}" if abs(d_theo)>=1 else None, d_theo),
+            ("Effective House Edge", f"{cur_edge:.2%}", f"{d_edge:+.2%}" if abs(d_edge)>=.0001 else None, d_edge),
+        ]
+        cards=[]
+        for label,value,delta,change in kpis:
+            help_text={
+                "Theo (latest snapshots)": "Theoretical Win = sum of bet × house edge. Modeled expected gaming win, not actual profit.",
+                "Effective House Edge": "Blended house edge for the actual game mix being played.",
+            }.get(label, label)
+            change_html=f'<div class="analytics-kpi-delta {"positive" if change>=0 else "negative"}">{"↑" if change>=0 else "↓"} {delta}</div>' if delta else ''
+            cards.append(f'<div class="analytics-kpi" title="{help_text}"><div class="analytics-kpi-label">{label}</div><div class="analytics-kpi-value">{value}</div>{change_html}</div>')
+        st.markdown("""<style>
+        .analytics-kpis {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:24px 20px;margin:20px 0;}
+        .analytics-kpi {min-width:0;}
+        .analytics-kpi-label {font-size:14px;margin-bottom:8px;}
+        .analytics-kpi-value {font-size:32px;line-height:1.3;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
+        .analytics-kpi-delta {font-size:16px;margin-top:6px;overflow-wrap:anywhere;}
+        .analytics-kpi-delta.positive {color:#09ab3b;}
+        .analytics-kpi-delta.negative {color:#ff2b2b;}
+        </style><div class="analytics-kpis">"""+''.join(cards)+'</div>',unsafe_allow_html=True)
 
         st.caption(
             f"Latest recorded window: {cur['latest_window']}  |  "
