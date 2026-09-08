@@ -59,7 +59,7 @@ def render():
     badge(60, 235, "01  PHYSICAL STATE", TEAL)
     box(60, 272, 325, 295, TEAL)
     label(82, 295, "Floor simulator", 19, TEXT, "bold")
-    label(82, 340, "36 positions · seats & queues\nTables, minimums & dealers\n10× clock · physical receipts", 13, MUTED)
+    label(82, 338, "36 positions · seats & queues\nDining arrival · dealer shortage\nTour group departure\n10× clock · physical receipts", 11.5, MUTED)
     ax.plot([82, 363], [450, 450], color=BORDER, lw=1)
     label(82, 466, "Durable floor state", 12, TEAL, "bold")
     label(82, 499, "simulator-state / floor.json", 11, MUTED)
@@ -88,7 +88,7 @@ def render():
     badge(1315, 235, "04  DECISIONS & EXECUTION", TEAL)
     box(1315, 272, 380, 295, TEAL)
     label(1337, 295, "Operations service", 19, TEXT, "bold")
-    label(1337, 340, "Constrained scenario engine\nPlan checks & automatic replanning\nOne-click approval & observations", 12, MUTED)
+    label(1337, 338, "Automatic floor suggestions\nOpen tables · adjust minimums\nConsolidate tables · release dealers\nOne-click approval & observations", 11.5, MUTED)
     ax.plot([1337, 1673], [450, 450], color=BORDER, lw=1)
     label(1337, 466, "SQLite WAL · operations-state", 12, TEAL, "bold")
     label(1337, 501, "Plans, tasks, commands & evidence", 11, MUTED)
@@ -96,7 +96,7 @@ def render():
     badge(1775, 235, "05  MANAGER WORKSPACE", TEAL)
     box(1775, 272, 365, 295, TEAL)
     label(1797, 295, "Streamlit · :8501", 19, TEXT, "bold")
-    label(1797, 340, "Live / +15 / +30 minute floor\nGoal + constraint review\nAction center · evidence\nEnglish guided product tour", 12, MUTED)
+    label(1797, 340, "Live floor · automatic suggestions\nAction center · Approve → applied\nAdvanced planning (collapsed)\nEnglish guided product tour", 12, MUTED)
     label(1797, 508, "Independent 3-second refresh", 11, TEAL, "bold")
 
     for start, end in [(385, 465), (755, 835), (1235, 1315), (1695, 1775)]:
@@ -116,7 +116,7 @@ def render():
                      (1254, 1090), (355, 1090), (355, 567)]
     line(command_route, GOLD, True)
     label(490, 1057, "Reviewed command delivery · simulator polls /commands every ~1s", 12, GOLD)
-    label(83, 601, "Validate → assign → apply", 11, TEAL)
+    label(83, 601, "Validate → apply → confirm", 11, TEAL)
     label(83, 635, "Confirmation returns in the\nnext streamed snapshot.", 11, MUTED)
 
     # Player ML is a separate analytics loop; it does not control operational tasks.
@@ -161,8 +161,9 @@ def render():
     box(60, 1215, 2080, 174, BORDER, "#101d2e")
     label(86, 1239, "EXECUTION CONTRACT", 11, TEAL, "bold")
     label(86, 1273, "PENDING  →  EXECUTING  →  OBSERVING  →  CLOSED", 17, TEXT, "bold")
-    label(86, 1320, "Freshness + version + staff + conflict checks  ·  Unique command IDs  ·  +5 / +15 minute observations", 12, MUTED)
-    label(86, 1353, "One action per scenario. Forecasts use demo assumptions; observed changes are not causal revenue lift.", 11, MUTED)
+    label(86, 1310, "Freshness + version + staff + conflict checks  ·  Unique command IDs  ·  +5 / +15 minute observations", 11, MUTED)
+    label(86, 1336, "Consolidation: compatible seats + guest budgets + no new queue  ·  Same area and game  ·  Rechecked before application", 11, MUTED)
+    label(86, 1362, "One table action per approval. Forecasts use demo assumptions; observed changes are not causal revenue lift.", 10.5, MUTED)
 
     # Small, consistent legend; use labels as well as colors.
     line([(65, 1425), (112, 1425)], BLUE)
